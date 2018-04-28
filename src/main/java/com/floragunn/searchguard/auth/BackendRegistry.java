@@ -547,24 +547,40 @@ public class BackendRegistry implements ConfigurationChangeListener {
         }
 
         try {
-            return cache.get(ac, new Callable<User>() {
-                @Override
-                public User call() throws Exception {
-                    if(log.isDebugEnabled()) {
-                        log.debug(ac.getUsername()+" not cached, return from "+authDomain.getBackend().getType()+" backend directly");
+            
+            if("jwt".equals(authDomain.getHttpAuthenticator().getType())
+                    || authDomain.getHttpAuthenticator().getClass() == HTTPClientCertAuthenticator.class) { 
+                //no caching for jwt or pki auth
+                final User authenticatedUser = authDomain.getBackend().authenticate(ac);
+                for (final AuthorizationBackend ab : authorizers) {
+                    try {
+                        ab.fillRoles(authenticatedUser, new AuthCredentials(authenticatedUser.getName()));
+                    } catch (Exception e) {
+                        log.error("Cannot retrieve roles for {} from {} due to {}", authenticatedUser, ab.getType(), e.toString(), e);
                     }
-                    final User authenticatedUser = authDomain.getBackend().authenticate(ac);
-                    for (final AuthorizationBackend ab : authorizers) {
-                        try {
-                            ab.fillRoles(authenticatedUser, new AuthCredentials(authenticatedUser.getName()));
-                        } catch (Exception e) {
-                            log.error("Cannot retrieve roles for {} from {} due to {}", authenticatedUser, ab.getType(), e.toString(), e);
-                        }
-                    }
-
-                    return authenticatedUser;
                 }
-            });
+
+                return authenticatedUser;
+            } else {            
+                return cache.get(ac, new Callable<User>() {
+                    @Override
+                    public User call() throws Exception {
+                        if(log.isDebugEnabled()) {
+                            log.debug(ac.getUsername()+" not cached, return from "+authDomain.getBackend().getType()+" backend directly");
+                        }
+                        final User authenticatedUser = authDomain.getBackend().authenticate(ac);
+                        for (final AuthorizationBackend ab : authorizers) {
+                            try {
+                                ab.fillRoles(authenticatedUser, new AuthCredentials(authenticatedUser.getName()));
+                            } catch (Exception e) {
+                                log.error("Cannot retrieve roles for {} from {} due to {}", authenticatedUser, ab.getType(), e.toString(), e);
+                            }
+                        }
+    
+                        return authenticatedUser;
+                    }
+                });
+            }
         } catch (Exception e) {
             if(log.isDebugEnabled()) {
                 log.debug("Can not authenticate "+ac.getUsername()+" due to "+e.toString(), e);
