@@ -1,7 +1,7 @@
 version: 2
 jobs:
   build:
-    #parallelism: 4
+    parallelism: 4
     working_directory: ~/circleci-sg
     resource_class: large
     docker:
@@ -20,6 +20,10 @@ jobs:
             - ~/.m2
           key: circleci-sg-{{ checksum "pom.xml" }}
       - run: ./smoketest.sh
+      - run:
+          command: |
+            echo $(circleci tests glob "**/SlowInteg*.java" "**/HttpInteg*.java")
+            circleci tests glob "**/SlowInteg*.java" "**/HttpInteg*.java" | xargs -n 1 echo
       - run: mvn -Pcoverage verify
       - store_test_results:
           path: target/surefire-reports
