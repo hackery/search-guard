@@ -24,7 +24,7 @@ jobs:
           command: |
             set -x
             cd src/test/java         
-            TESTFILES="$(circleci tests glob **/*Test*.java | circleci tests split | -s '\n' ',')"
+            TESTFILES="$(circleci tests glob **/*Test*.java | circleci tests split | tr -s '\n' ',')"
             echo "$TESTFILES"
             #echo "${TESTFILES// /,}"
             cd ~/circleci-sg
