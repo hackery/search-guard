@@ -19,18 +19,16 @@ jobs:
           paths:
             - ~/.m2
           key: circleci-sg-{{ checksum "pom.xml" }}
-      - run: ./smoketest.sh
+      #- run: ./smoketest.sh
       - run:
           command: |
             ls -la
             pwd
             cd src/test/java
             TESTFILES=$(circleci tests glob "**/*Test*.java" | circleci tests split)
-            TESTFILES2="$(circleci tests glob **/*Test*.java | circleci tests split)"
             echo $TESTFILES
-            echo $TESTFILES2
             cd ~/circleci-sg
-            mvn -Pcoverage verify mvn test -Dtest="$TESTFILES"
+            mvn -Pcoverage verify -Dtest="$TESTFILES"
       #- run: mvn -Pcoverage verify mvn test -Dtest="com/floragunn/searchguard/HealthTests.java"
       - store_test_results:
           path: target/surefire-reports
