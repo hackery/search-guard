@@ -22,8 +22,6 @@ jobs:
       - run: ./smoketest.sh
       - run:
           command: |
-            echo $(circleci tests glob "src/test/**/*Test*.java")
-            circleci tests glob "src/test/**/*Test*.java" | xargs -n 1 echo
             circleci tests glob "src/test/**/*Test*.java" | circleci tests split
       - run: mvn -Pcoverage verify
       - store_test_results:
