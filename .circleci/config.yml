@@ -19,7 +19,7 @@ jobs:
           paths:
             - ~/.m2
           key: circleci-sg-{{ checksum "pom.xml" }}
-      #- run: ./smoketest.sh
+      - run: ./smoketest.sh
       - run:
           command: |
             set -x
