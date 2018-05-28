@@ -22,8 +22,9 @@ jobs:
       - run: ./smoketest.sh
       - run:
           command: |
-            echo $(circleci tests glob "**/SlowInteg*.java" "**/HttpInteg*.java")
-            circleci tests glob "**/SlowInteg*.java" "**/HttpInteg*.java" | xargs -n 1 echo
+            echo $(circleci tests glob "src/test/**/*Test*.java")
+            circleci tests glob "src/test/**/*Test*.java" | xargs -n 1 echo
+            circleci tests glob "src/test/**/*Test*.java" | circleci tests split
       - run: mvn -Pcoverage verify
       - store_test_results:
           path: target/surefire-reports
