@@ -22,11 +22,9 @@ jobs:
       #- run: ./smoketest.sh
       - run:
           command: |
-            ls -la
-            pwd
             cd src/test/java         
-            TESTFILES=$(circleci tests glob "**/*Test*.java" | circleci tests split)
-            echo ${TESTFILES// /,}
+            TESTFILES="$(circleci tests glob **/*Test*.java | circleci tests split)"
+            echo "${TESTFILES// /,}"
             cd ~/circleci-sg
             mvn -Pcoverage verify -Dtest="${TESTFILES// /,}"
       #- run: mvn -Pcoverage verify mvn test -Dtest="com/floragunn/searchguard/HealthTests.java"
