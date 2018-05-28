@@ -23,9 +23,9 @@ import java.util.LinkedList;
 import java.util.List;
 
 public enum ClusterConfiguration {
-	// TODO: 2 master nodes?
-    HUGE(new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(true, true,false), new NodeSettings(false, true, false)),
-	DEFAULT(new NodeSettings(true, false, false), new NodeSettings(true, true,false), new NodeSettings(false, true, false)),
+	//first one needs to be a master
+    HUGE(new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(false, true,false), new NodeSettings(false, true, false)),
+	DEFAULT(new NodeSettings(true, false, false), new NodeSettings(false, true,false), new NodeSettings(false, true, false)),
 	SINGLENODE(new NodeSettings(true, true, false));
 	
 	private List<NodeSettings> nodeSettings = new LinkedList<>();

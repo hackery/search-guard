@@ -17,6 +17,8 @@
 
 package com.floragunn.searchguard.test;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.Settings;
 import org.junit.After;
@@ -28,7 +30,9 @@ import com.floragunn.searchguard.test.helper.rest.RestHelper;
 
 public abstract class SingleClusterTest extends AbstractSGUnitTest {
     
-    protected ClusterHelper clusterHelper = new ClusterHelper("unittest_cluster_1");
+    private static final AtomicLong num = new AtomicLong();
+    
+    protected ClusterHelper clusterHelper = new ClusterHelper("utest_n"+num.incrementAndGet()+"_f"+System.getProperty("forkno")+"_t"+System.nanoTime());
     protected ClusterInfo clusterInfo;
     
     protected void setup(Settings nodeOverride) throws Exception {    
