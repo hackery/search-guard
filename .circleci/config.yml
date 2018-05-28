@@ -1,7 +1,7 @@
 version: 2
 jobs:
   build:
-    parallelism: 4
+    parallelism: 5
     working_directory: ~/circleci-sg
     resource_class: large
     docker:
@@ -24,7 +24,7 @@ jobs:
           command: |
             set -x
             cd src/test/java         
-            TESTFILES="$(circleci tests glob **/*Test*.java | circleci tests split --split-by=timings | tr -s '\n' ',')"
+            TESTFILES="$(circleci tests glob **/*Tests*.java | circleci tests split --split-by=timings | tr -s '\n' ',')"
             echo "$TESTFILES"
             #echo "${TESTFILES// /,}"
             cd ~/circleci-sg

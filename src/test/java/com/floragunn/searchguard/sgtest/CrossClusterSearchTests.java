@@ -34,7 +34,7 @@ import com.floragunn.searchguard.test.helper.cluster.ClusterInfo;
 import com.floragunn.searchguard.test.helper.rest.RestHelper;
 import com.floragunn.searchguard.test.helper.rest.RestHelper.HttpResponse;
 
-public class CrossClusterSearchTest extends AbstractSGUnitTest{
+public class CrossClusterSearchTests extends AbstractSGUnitTest{
     
     private final ClusterHelper cl1 = new ClusterHelper("crl1_n"+num.incrementAndGet()+"_f"+System.getProperty("forkno")+"_t"+System.nanoTime());
     private final ClusterHelper cl2 = new ClusterHelper("crl2_n"+num.incrementAndGet()+"_f"+System.getProperty("forkno")+"_t"+System.nanoTime());
