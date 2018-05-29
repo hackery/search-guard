@@ -23,6 +23,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.SortedSet;
+import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 
 import org.apache.commons.io.FileUtils;
@@ -103,7 +104,8 @@ public final class ClusterHelper {
 		SortedSet<Integer> httpPorts = SocketUtils.findAvailableTcpPorts(internalNodeSettings.size(), tcpPorts.last()+1, SocketUtils.PORT_RANGE_MAX);
         Iterator<Integer> httpPortsIt = httpPorts.iterator();
 		
-		
+		final CountDownLatch latch = new CountDownLatch(internalNodeSettings.size());
+        
 		for (int i = 0; i < internalNodeSettings.size(); i++) {
 			NodeSettings setting = internalNodeSettings.get(i);
 			
@@ -112,20 +114,29 @@ public final class ClusterHelper {
 							.put(nodeSettingsSupplier == null ? Settings.Builder.EMPTY_SETTINGS : nodeSettingsSupplier.get(i)).build(),
 					Netty4Plugin.class, SearchGuardPlugin.class, MatrixAggregationPlugin.class, MustachePlugin.class, ParentJoinPlugin.class, PercolatorPlugin.class, ReindexPlugin.class);
 			System.out.println(node.settings());
+			
 			new Thread(new Runnable() {
                 
                 @Override
                 public void run() {
                     try {
                         node.start();
+                        latch.countDown();
                     } catch (NodeValidationException e) {
                         // TODO Auto-generated catch block
                         e.printStackTrace();
                     }
                 }
-            }).start();;
+            }).start();
+			
+			
+			
 			esNodes.add(node);
 		}
+		
+		
+		latch.await();
+		
 		ClusterInfo cInfo = waitForCluster(ClusterHealthStatus.GREEN, TimeValue.timeValueSeconds(timeout), nodes == null?esNodes.size():nodes.intValue());
 		cInfo.numNodes = internalNodeSettings.size();
 		cInfo.clustername = clustername;
