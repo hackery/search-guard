@@ -117,7 +117,7 @@ public class SnapshotRestoreTests extends SingleClusterTest {
         final Settings settings = Settings.builder()
                 .putList("path.repo", repositoryPath.getRoot().getAbsolutePath())
                 .put("searchguard.enable_snapshot_restore_privilege", true)
-                .put("searchguard.check_snapshot_restore_write_privileges", false)
+                .put("searchguard.check_snapshot_restore_write_privileges", true)
                 .build();
     
         setup(settings, currentClusterConfig);
