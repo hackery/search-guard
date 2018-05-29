@@ -35,6 +35,10 @@ public abstract class SingleClusterTest extends AbstractSGUnitTest {
         setup(Settings.EMPTY, new DynamicSgConfig(), nodeOverride, true);
     }
     
+    protected void setup(Settings nodeOverride, ClusterConfiguration clusterConfiguration) throws Exception {    
+        setup(Settings.EMPTY, new DynamicSgConfig(), nodeOverride, true, clusterConfiguration);
+    }
+    
     protected void setup() throws Exception {    
         setup(Settings.EMPTY, new DynamicSgConfig(), Settings.EMPTY, true);
     }

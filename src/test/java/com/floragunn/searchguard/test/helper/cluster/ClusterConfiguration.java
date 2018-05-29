@@ -24,9 +24,16 @@ import java.util.List;
 
 public enum ClusterConfiguration {
 	//first one needs to be a master
-    HUGE(new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(false, true,false), new NodeSettings(false, true, false)),
-	DEFAULT(new NodeSettings(true, false, false), new NodeSettings(false, true,false), new NodeSettings(false, true, false)),
-	SINGLENODE(new NodeSettings(true, true, false));
+    //HUGE(new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(true, false, false), new NodeSettings(false, true,false), new NodeSettings(false, true, false)),
+	
+    //3 nodes (1m, 2d)
+    DEFAULT(new NodeSettings(true, false, false), new NodeSettings(false, true, false), new NodeSettings(false, true, false)),
+	
+    //1 node (1md)
+	SINGLENODE(new NodeSettings(true, true, false)),
+    
+	//4 node (1m, 2d, 1c)
+	CLIENTNODE(new NodeSettings(true, false, false), new NodeSettings(false, true, false), new NodeSettings(false, true, false), new NodeSettings(false, false, false));
 	
 	private List<NodeSettings> nodeSettings = new LinkedList<>();
 	
@@ -38,8 +45,20 @@ public enum ClusterConfiguration {
 		return Collections.unmodifiableList(nodeSettings);
 	}
 	
+	public int getNodes() {
+        return nodeSettings.size();
+    }
+	
 	public int getMasterNodes() {
         return (int) nodeSettings.stream().filter(a->a.masterNode).count();
+    }
+	
+	public int getDataNodes() {
+        return (int) nodeSettings.stream().filter(a->a.dataNode).count();
+    }
+	
+	public int getClientNodes() {
+        return (int) nodeSettings.stream().filter(a->!a.masterNode && !a.dataNode).count();
     }
 	
 	public static class NodeSettings {

@@ -37,6 +37,7 @@ import org.elasticsearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.elasticsearch.action.admin.cluster.node.info.NodesInfoResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
+import org.elasticsearch.cluster.node.DiscoveryNode.Role;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
@@ -174,21 +175,61 @@ public final class ClusterHelper {
 
 			final List<NodeInfo> nodes = res.getNodes();
 
-			// TODO: can be optimized
-			for (NodeInfo nodeInfo: nodes) {
-				if (nodeInfo.getHttp() != null && nodeInfo.getHttp().address() != null) {
-					final TransportAddress is = nodeInfo.getHttp().address()
-							.publishAddress();
-					clusterInfo.httpPort = is.getPort();
-					clusterInfo.httpHost = is.getAddress();
-					clusterInfo.httpAdresses.add(is);
-				}
+			//final List<NodeInfo> masterNodes = nodes.stream().filter(n->n.getNode().getRoles().contains(Role.MASTER)).collect(Collectors.toList());
+	        final List<NodeInfo> dataNodes = nodes.stream().filter(n->n.getNode().getRoles().contains(Role.DATA) && !n.getNode().getRoles().contains(Role.MASTER)).collect(Collectors.toList());
+	        final List<NodeInfo> clientNodes = nodes.stream().filter(n->!n.getNode().getRoles().contains(Role.MASTER) && !n.getNode().getRoles().contains(Role.DATA)).collect(Collectors.toList());
 
-				final TransportAddress is = nodeInfo.getTransport().getAddress()
-						.publishAddress();
-				clusterInfo.nodePort = is.getPort();
-				clusterInfo.nodeHost = is.getAddress();
-			}
+	        if(!clientNodes.isEmpty()) {
+	            NodeInfo nodeInfo = clientNodes.get(0);
+	            if (nodeInfo.getHttp() != null && nodeInfo.getHttp().address() != null) {
+                    final TransportAddress his = nodeInfo.getHttp().address()
+                            .publishAddress();
+                    clusterInfo.httpPort = his.getPort();
+                    clusterInfo.httpHost = his.getAddress();
+                    clusterInfo.httpAdresses.add(his);
+                } else {
+                    throw new RuntimeException("no http host/port for client node");
+                }
+
+                final TransportAddress is = nodeInfo.getTransport().getAddress()
+                        .publishAddress();
+                clusterInfo.nodePort = is.getPort();
+                clusterInfo.nodeHost = is.getAddress();
+	        } else if(!dataNodes.isEmpty()) {
+	            
+	            for (NodeInfo nodeInfo: dataNodes) {
+	                final TransportAddress is = nodeInfo.getTransport().getAddress()
+                            .publishAddress();
+                    clusterInfo.nodePort = is.getPort();
+                    clusterInfo.nodeHost = is.getAddress();
+	                
+	                if (nodeInfo.getHttp() != null && nodeInfo.getHttp().address() != null) {
+	                    final TransportAddress his = nodeInfo.getHttp().address()
+	                            .publishAddress();
+	                    clusterInfo.httpPort = his.getPort();
+	                    clusterInfo.httpHost = his.getAddress();
+	                    clusterInfo.httpAdresses.add(his);
+	                    break;
+	                }  
+	            }  
+	        }  else  {
+                
+                for (NodeInfo nodeInfo: nodes) {
+                    final TransportAddress is = nodeInfo.getTransport().getAddress()
+                            .publishAddress();
+                    clusterInfo.nodePort = is.getPort();
+                    clusterInfo.nodeHost = is.getAddress();
+                    
+                    if (nodeInfo.getHttp() != null && nodeInfo.getHttp().address() != null) {
+                        final TransportAddress his = nodeInfo.getHttp().address()
+                                .publishAddress();
+                        clusterInfo.httpPort = his.getPort();
+                        clusterInfo.httpHost = his.getAddress();
+                        clusterInfo.httpAdresses.add(his);
+                        break;
+                    }  
+                }  
+            }       	
 		} catch (final ElasticsearchTimeoutException e) {
 			throw new IOException(
 					"timeout, cluster does not respond to health request, cowardly refusing to continue with operations");

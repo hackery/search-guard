@@ -17,83 +17,46 @@
 
 package com.floragunn.searchguard;
 
-import io.netty.handler.ssl.OpenSsl;
+import java.util.Arrays;
+import java.util.Collection;
 
-import java.io.File;
-import java.lang.Thread.UncaughtExceptionHandler;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.TreeSet;
-
-import org.apache.commons.io.FileUtils;
-import org.apache.http.Header;
 import org.apache.http.HttpStatus;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.message.BasicHeader;
-import org.elasticsearch.ElasticsearchSecurityException;
-import org.elasticsearch.action.DocWriteResponse.Result;
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
-import org.elasticsearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.elasticsearch.action.admin.cluster.repositories.put.PutRepositoryRequest;
-import org.elasticsearch.action.admin.cluster.reroute.ClusterRerouteRequest;
 import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotRequest;
-import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
-import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest.AliasActions;
-import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
-import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
-import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
-import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.action.search.SearchRequest;
-import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.support.WriteRequest.RefreshPolicy;
 import org.elasticsearch.client.transport.TransportClient;
-import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.transport.TransportAddress;
-import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.common.util.concurrent.ThreadContext;
-import org.elasticsearch.common.util.concurrent.ThreadContext.StoredContext;
 import org.elasticsearch.common.xcontent.XContentType;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.indices.InvalidIndexNameException;
-import org.elasticsearch.indices.InvalidTypeNameException;
-import org.elasticsearch.node.Node;
-import org.elasticsearch.node.PluginAwareNode;
-import org.elasticsearch.transport.Netty4Plugin;
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
 
 import com.floragunn.searchguard.action.configupdate.ConfigUpdateAction;
 import com.floragunn.searchguard.action.configupdate.ConfigUpdateRequest;
 import com.floragunn.searchguard.action.configupdate.ConfigUpdateResponse;
-import com.floragunn.searchguard.action.whoami.WhoAmIAction;
-import com.floragunn.searchguard.action.whoami.WhoAmIResponse;
-import com.floragunn.searchguard.action.whoami.WhoAmIRequest;
-import com.floragunn.searchguard.configuration.PrivilegesInterceptorImpl;
-import com.floragunn.searchguard.http.HTTPClientCertAuthenticator;
-import com.floragunn.searchguard.ssl.util.ExceptionUtils;
-import com.floragunn.searchguard.ssl.util.SSLConfigConstants;
-import com.floragunn.searchguard.support.ConfigConstants;
 import com.floragunn.searchguard.test.DynamicSgConfig;
 import com.floragunn.searchguard.test.SingleClusterTest;
 import com.floragunn.searchguard.test.helper.cluster.ClusterConfiguration;
-import com.floragunn.searchguard.test.helper.file.FileHelper;
 import com.floragunn.searchguard.test.helper.rest.RestHelper;
-import com.floragunn.searchguard.test.helper.rest.RestHelper.HttpResponse;
 
+@RunWith(Parameterized.class)
 public class SnapshotRestoreTests extends SingleClusterTest {
 
-    private ThreadContext newThreadContext(String sslPrincipal) {
-        ThreadContext threadContext = new ThreadContext(Settings.EMPTY);
-        threadContext.putTransient(ConfigConstants.SG_SSL_PRINCIPAL, sslPrincipal);
-        return threadContext;
+    @Parameters
+    public static Collection<ClusterConfiguration> data() {
+        return Arrays.asList(new ClusterConfiguration[] {     
+                ClusterConfiguration.DEFAULT
+           });
     }
+    
+    @Parameter
+    public ClusterConfiguration currentClusterConfig;
 
+    
     @Test
     public void testSnapshot() throws Exception {
     
@@ -103,7 +66,7 @@ public class SnapshotRestoreTests extends SingleClusterTest {
                 .put("searchguard.check_snapshot_restore_write_privileges", false)
                 .build();
     
-        setup(settings);
+        setup(settings, currentClusterConfig);
     
         try (TransportClient tc = getInternalTransportClient()) {    
             tc.index(new IndexRequest("vulcangov").type("kolinahr").setRefreshPolicy(RefreshPolicy.IMMEDIATE).source("{\"content\":1}", XContentType.JSON)).actionGet();
@@ -154,10 +117,10 @@ public class SnapshotRestoreTests extends SingleClusterTest {
         final Settings settings = Settings.builder()
                 .putList("path.repo", repositoryPath.getRoot().getAbsolutePath())
                 .put("searchguard.enable_snapshot_restore_privilege", true)
-                .put("searchguard.check_snapshot_restore_write_privileges", true)
+                .put("searchguard.check_snapshot_restore_write_privileges", false)
                 .build();
     
-        setup(settings);
+        setup(settings, currentClusterConfig);
     
         try (TransportClient tc = getInternalTransportClient()) {
             tc.index(new IndexRequest("vulcangov").type("kolinahr").setRefreshPolicy(RefreshPolicy.IMMEDIATE).source("{\"content\":1}", XContentType.JSON)).actionGet();
@@ -172,7 +135,7 @@ public class SnapshotRestoreTests extends SingleClusterTest {
             tc.admin().cluster().createSnapshot(new CreateSnapshotRequest("all", "all_1").indices("*").includeGlobalState(false).waitForCompletion(true)).actionGet();
     
             ConfigUpdateResponse cur = tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();
-            Assert.assertEquals(3, cur.getNodes().size());
+            Assert.assertEquals(currentClusterConfig.getNodes(), cur.getNodes().size());
             System.out.println(cur.getNodesMap());
         }
     
@@ -224,7 +187,7 @@ public class SnapshotRestoreTests extends SingleClusterTest {
                 .put("searchguard.check_snapshot_restore_write_privileges", true)
                 .build();
     
-        setup(Settings.EMPTY, new DynamicSgConfig().setSgActionGroups("sg_action_groups_packaged.yml"), settings, true);
+        setup(Settings.EMPTY, new DynamicSgConfig().setSgActionGroups("sg_action_groups_packaged.yml"), settings, true, currentClusterConfig);
     
         try (TransportClient tc = getInternalTransportClient()) {    
             tc.index(new IndexRequest("testsnap1").type("kolinahr").setRefreshPolicy(RefreshPolicy.IMMEDIATE).source("{\"content\":1}", XContentType.JSON)).actionGet();
