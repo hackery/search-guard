@@ -44,6 +44,7 @@ import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.reindex.ReindexPlugin;
 import org.elasticsearch.join.ParentJoinPlugin;
 import org.elasticsearch.node.Node;
+import org.elasticsearch.node.NodeValidationException;
 import org.elasticsearch.node.PluginAwareNode;
 import org.elasticsearch.percolator.PercolatorPlugin;
 import org.elasticsearch.script.mustache.MustachePlugin;
@@ -111,9 +112,19 @@ public final class ClusterHelper {
 							.put(nodeSettingsSupplier == null ? Settings.Builder.EMPTY_SETTINGS : nodeSettingsSupplier.get(i)).build(),
 					Netty4Plugin.class, SearchGuardPlugin.class, MatrixAggregationPlugin.class, MustachePlugin.class, ParentJoinPlugin.class, PercolatorPlugin.class, ReindexPlugin.class);
 			System.out.println(node.settings());
-			node.start();
+			new Thread(new Runnable() {
+                
+                @Override
+                public void run() {
+                    try {
+                        node.start();
+                    } catch (NodeValidationException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+                }
+            }).start();;
 			esNodes.add(node);
-			Thread.sleep(200);
 		}
 		ClusterInfo cInfo = waitForCluster(ClusterHealthStatus.GREEN, TimeValue.timeValueSeconds(timeout), nodes == null?esNodes.size():nodes.intValue());
 		cInfo.numNodes = internalNodeSettings.size();
