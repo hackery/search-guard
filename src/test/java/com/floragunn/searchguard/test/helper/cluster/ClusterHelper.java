@@ -53,7 +53,6 @@ import com.floragunn.searchguard.SearchGuardPlugin;
 import com.floragunn.searchguard.test.NodeSettingsSupplier;
 import com.floragunn.searchguard.test.helper.cluster.ClusterConfiguration.NodeSettings;
 import com.floragunn.searchguard.test.helper.network.SocketUtils;
-import com.google.common.base.Joiner;
 
 public final class ClusterHelper {
 
@@ -64,7 +63,7 @@ public final class ClusterHelper {
     
 	protected final Logger log = LogManager.getLogger(ClusterHelper.class);
 
-	protected final List<Node> esNodes = new LinkedList<>();
+	protected final List<PluginAwareNode> esNodes = new LinkedList<>();
 
 	private final String clustername;
 	
@@ -106,7 +105,7 @@ public final class ClusterHelper {
 		for (int i = 0; i < internalNodeSettings.size(); i++) {
 			NodeSettings setting = internalNodeSettings.get(i);
 			
-			Node node = new PluginAwareNode(
+			PluginAwareNode node = new PluginAwareNode(setting.masterNode,
 					getMinimumNonSgNodeSettingsBuilder(i, setting.masterNode, setting.dataNode, setting.tribeNode, internalNodeSettings.size(), clusterConfiguration.getMasterNodes(), tcpPorts, tcpPortsIt.next(), httpPortsIt.next())
 							.put(nodeSettingsSupplier == null ? Settings.Builder.EMPTY_SETTINGS : nodeSettingsSupplier.get(i)).build(),
 					Netty4Plugin.class, SearchGuardPlugin.class, MatrixAggregationPlugin.class, MustachePlugin.class, ParentJoinPlugin.class, PercolatorPlugin.class, ReindexPlugin.class);
@@ -122,18 +121,26 @@ public final class ClusterHelper {
 	}
 
 	public final void stopCluster() throws Exception {
-		for (Node node : esNodes) {
-			try {
-                node.close();
-                LoggerContext context = (LoggerContext) LogManager.getContext(false);
-                Configurator.shutdown(context);
-                Thread.sleep(150);
-            } catch (Throwable e) {
-                e.printStackTrace();
-            }
-		}
+	    
+	    //close non master nodes
+	    esNodes.stream().filter(n->!n.isMasterEligible()).forEach(node->closeNode(node));
+	    
+	    //close master nodes
+	    esNodes.stream().filter(n->n.isMasterEligible()).forEach(node->closeNode(node));		
 		esNodes.clear();
 	}
+	
+	private static void closeNode(Node node) {
+	    try {
+            LoggerContext context = (LoggerContext) LogManager.getContext(false);
+            Configurator.shutdown(context);
+	        node.close();
+	        Thread.sleep(250);
+        } catch (Throwable e) {
+            //ignore
+        }
+	}
+	
 
 	public Client nodeClient() {
 	    return esNodes.get(0).client();
