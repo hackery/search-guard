@@ -19,6 +19,7 @@ package com.floragunn.searchguard;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.TimeZone;
 
 import org.apache.http.HttpStatus;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
@@ -265,7 +266,10 @@ public class IndexIntegrationTests extends SingleClusterTest {
             tc.index(new IndexRequest("logstash-3").type("logs").setRefreshPolicy(RefreshPolicy.IMMEDIATE).source("{\"content\":1}", XContentType.JSON)).actionGet();
             tc.index(new IndexRequest("logstash-4").type("logs").setRefreshPolicy(RefreshPolicy.IMMEDIATE).source("{\"content\":1}", XContentType.JSON)).actionGet();
     
-            String date = new SimpleDateFormat("YYYY.MM.dd").format(new Date());
+            SimpleDateFormat sdf = new SimpleDateFormat("YYYY.MM.dd");
+            sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+            
+            String date = sdf.format(new Date());
             tc.index(new IndexRequest("logstash-"+date).type("logs").setRefreshPolicy(RefreshPolicy.IMMEDIATE).source("{\"content\":1}", XContentType.JSON)).actionGet();
         }
         
