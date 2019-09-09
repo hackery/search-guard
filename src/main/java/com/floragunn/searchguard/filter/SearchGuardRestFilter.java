@@ -38,12 +38,14 @@ import org.elasticsearch.threadpool.ThreadPool;
 import com.floragunn.searchguard.auditlog.AuditLog;
 import com.floragunn.searchguard.auditlog.AuditLog.Origin;
 import com.floragunn.searchguard.auth.BackendRegistry;
+import com.floragunn.searchguard.configuration.CompatConfig;
 import com.floragunn.searchguard.ssl.transport.PrincipalExtractor;
 import com.floragunn.searchguard.ssl.util.ExceptionUtils;
 import com.floragunn.searchguard.ssl.util.SSLRequestHelper;
 import com.floragunn.searchguard.ssl.util.SSLRequestHelper.SSLInfo;
 import com.floragunn.searchguard.support.ConfigConstants;
 import com.floragunn.searchguard.support.HTTPHelper;
+import com.floragunn.searchguard.user.User;
 
 public class SearchGuardRestFilter {
 
@@ -54,10 +56,11 @@ public class SearchGuardRestFilter {
     private final PrincipalExtractor principalExtractor;
     private final Settings settings;
     private final Path configPath;
+    private final CompatConfig compatConfig;
 
     public SearchGuardRestFilter(final BackendRegistry registry, final AuditLog auditLog,
             final ThreadPool threadPool, final PrincipalExtractor principalExtractor,
-            final Settings settings, final Path configPath) {
+            final Settings settings, final Path configPath, final CompatConfig compatConfig) {
         super();
         this.registry = registry;
         this.auditLog = auditLog;
@@ -65,6 +68,7 @@ public class SearchGuardRestFilter {
         this.principalExtractor = principalExtractor;
         this.settings = settings;
         this.configPath = configPath;
+        this.compatConfig = compatConfig;
     }
     
     public RestHandler wrap(RestHandler original) {
@@ -72,6 +76,7 @@ public class SearchGuardRestFilter {
             
             @Override
             public void handleRequest(RestRequest request, RestChannel channel, NodeClient client) throws Exception {
+                org.apache.logging.log4j.ThreadContext.clearAll();
                 if(!checkAndAuthenticateRequest(request, channel, client)) {
                     original.handleRequest(request, channel, client);
                 }
@@ -118,13 +123,21 @@ public class SearchGuardRestFilter {
             channel.sendResponse(new BytesRestResponse(channel, RestStatus.FORBIDDEN, e));
             return true;
         }
+        
+        if(!compatConfig.restAuthEnabled()) {
+            return false;
+        }
 
         if(request.method() != Method.OPTIONS 
                 && !"/_searchguard/license".equals(request.path())
                 && !"/_searchguard/health".equals(request.path())) {
             if (!registry.authenticate(request, channel, threadContext)) {
                 // another roundtrip
+                org.apache.logging.log4j.ThreadContext.remove("user");
                 return true;
+            } else {
+                // make it possible to filter logs by username
+                org.apache.logging.log4j.ThreadContext.put("user", ((User)threadContext.getTransient(ConfigConstants.SG_USER)).getName());
             }
         }
         

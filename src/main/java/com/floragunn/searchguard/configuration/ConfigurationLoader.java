@@ -17,8 +17,8 @@
 
 package com.floragunn.searchguard.configuration;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,7 +28,6 @@ import java.util.concurrent.TimeoutException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
@@ -37,6 +36,7 @@ import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.get.MultiGetResponse.Failure;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
 import org.elasticsearch.common.xcontent.XContentHelper;
@@ -45,30 +45,32 @@ import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import com.floragunn.searchguard.support.ConfigConstants;
+import com.floragunn.searchguard.support.SearchGuardDeprecationHandler;
+import com.floragunn.searchguard.support.SgUtils;
 
 class ConfigurationLoader {
 
     protected final Logger log = LogManager.getLogger(this.getClass());
     private final Client client;
-	//private final ThreadContext threadContext;
+    private final Settings settings;
     private final String searchguardIndex;
     
     ConfigurationLoader(final Client client, ThreadPool threadPool, final Settings settings) {
         super();
         this.client = client;
-        //this.threadContext = threadPool.getThreadContext();
+        this.settings = settings;
         this.searchguardIndex = settings.get(ConfigConstants.SEARCHGUARD_CONFIG_INDEX_NAME, ConfigConstants.SG_DEFAULT_CONFIG_INDEX);
         log.debug("Index is: {}", searchguardIndex);
     }
     
-    Map<String, Settings> load(final String[] events, long timeout, TimeUnit timeUnit) throws InterruptedException, TimeoutException {
+    Map<String, Tuple<Long, Settings>> load(final String[] events, long timeout, TimeUnit timeUnit) throws InterruptedException, TimeoutException {
         final CountDownLatch latch = new CountDownLatch(events.length);
-        final Map<String, Settings> rs = new HashMap<String, Settings>(events.length);
+        final Map<String, Tuple<Long, Settings>> rs = new HashMap<String, Tuple<Long, Settings>>(events.length);
         
         loadAsync(events, new ConfigCallback() {
             
             @Override
-            public void success(String id, Settings settings) {
+            public void success(String id, Tuple<Long, Settings> settings) {
                 if(latch.getCount() <= 0) {
                     log.error("Latch already counted down (for {} of {})  (index={})", id, Arrays.toString(events), searchguardIndex);
                 }
@@ -104,7 +106,7 @@ class ConfigurationLoader {
         return rs;
     }
     
-    void loadAsync(final String[] events, final ConfigCallback callback) {        
+    void loadAsync(final String[] events, final ConfigCallback callback) {
         if(events == null || events.length == 0) {
             log.warn("No config events requested to load");
             return;
@@ -119,55 +121,62 @@ class ConfigurationLoader {
         
         mget.refresh(true);
         mget.realtime(true);
-        
-        //try(StoredContext ctx = threadContext.stashContext()) {
-        //    threadContext.putHeader(ConfigConstants.SG_CONF_REQUEST_HEADER, "true");
-        {
-            client.multiGet(mget, new ActionListener<MultiGetResponse>() {
-                @Override
-                public void onResponse(MultiGetResponse response) {
-                    MultiGetItemResponse[] responses = response.getResponses();
-                    for (int i = 0; i < responses.length; i++) {
-                        MultiGetItemResponse singleResponse = responses[i];
-                        if(singleResponse != null && !singleResponse.isFailed()) {
-                            GetResponse singleGetResponse = singleResponse.getResponse();
-                            if(singleGetResponse.isExists() && !singleGetResponse.isSourceEmpty()) {
-                                //success
-                                final Settings _settings = toSettings(singleGetResponse.getSourceAsBytesRef(), singleGetResponse.getId());
-                                if(_settings != null) {
+
+        client.multiGet(mget, new ActionListener<MultiGetResponse>() {
+            @Override
+            public void onResponse(MultiGetResponse response) {
+                MultiGetItemResponse[] responses = response.getResponses();
+                for (int i = 0; i < responses.length; i++) {
+                    MultiGetItemResponse singleResponse = responses[i];
+                    if(singleResponse != null && !singleResponse.isFailed()) {
+                        GetResponse singleGetResponse = singleResponse.getResponse();
+                        if(singleGetResponse.isExists() && !singleGetResponse.isSourceEmpty()) {
+                            //success
+                            try {
+                                final Tuple<Long, Settings> _settings = toSettings(singleGetResponse);
+                                if(_settings.v2() != null) {
                                     callback.success(singleGetResponse.getId(), _settings);
                                 } else {
-                                    log.error("Cannot parse settings for "+singleGetResponse.getId());
+                                    callback.failure(new Exception("Cannot parse settings for "+singleGetResponse.getId()));
                                 }
-                            } else {
-                                //does not exist or empty source
-                                callback.noData(singleGetResponse.getId());
+                            } catch (Exception e) {
+                                callback.failure(e);
                             }
                         } else {
-                            //failure
-                            callback.singleFailure(singleResponse==null?null:singleResponse.getFailure());
+                            //does not exist or empty source
+                            callback.noData(singleGetResponse.getId());
                         }
+                    } else {
+                        //failure
+                        callback.singleFailure(singleResponse==null?null:singleResponse.getFailure());
                     }
-                }           
-                
-                @Override
-                public void onFailure(Exception e) {
-                    callback.failure(e);
                 }
-            });
-        }
+            }
+            
+            @Override
+            public void onFailure(Exception e) {
+                callback.failure(e);
+            }
+        });
+        
     }
 
-    private Settings toSettings(final BytesReference ref, final String id) {
+    private Tuple<Long, Settings> toSettings(GetResponse singleGetResponse) throws Exception {
+        final BytesReference ref = singleGetResponse.getSourceAsBytesRef();
+        final String id = singleGetResponse.getId();
+        final long version = singleGetResponse.getVersion();
+        
+
         if (ref == null || ref.length() == 0) {
             log.error("Empty or null byte reference for {}", id);
             return null;
         }
         
+        
         XContentParser parser = null;
 
         try {
-            parser = XContentHelper.createParser(NamedXContentRegistry.EMPTY, ref, XContentType.JSON);
+            parser = XContentHelper.createParser(NamedXContentRegistry.EMPTY, SearchGuardDeprecationHandler.INSTANCE, ref, XContentType.JSON);
             parser.nextToken();
             parser.nextToken();
          
@@ -177,13 +186,17 @@ class ConfigurationLoader {
             }
             
             parser.nextToken();
+            
+            final byte[] content = parser.binaryValue();
 
-            return Settings.builder().loadFromStream("dummy.json", new ByteArrayInputStream(parser.binaryValue()), true).build();
-        } catch (final IOException e) {
-            throw ExceptionsHelper.convertToElastic(e);
+            return new Tuple<Long, Settings>(version, Settings.builder().loadFromSource(SgUtils.replaceEnvVars(new String(content, StandardCharsets.UTF_8), settings), XContentType.JSON).build());
         } finally {
             if(parser != null) {
-                parser.close();
+                try {
+                    parser.close();
+                } catch (IOException e) {
+                    //ignore
+                }
             }
         }
     }

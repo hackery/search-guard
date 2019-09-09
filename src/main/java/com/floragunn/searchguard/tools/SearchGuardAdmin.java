@@ -20,10 +20,8 @@ package com.floragunn.searchguard.tools;
 import java.io.ByteArrayInputStream;
 import java.io.Console;
 import java.io.File;
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.Reader;
 import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -31,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Currency;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -63,19 +62,18 @@ import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
 import org.elasticsearch.action.admin.indices.get.GetIndexRequest.Feature;
 import org.elasticsearch.action.admin.indices.get.GetIndexResponse;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequest;
-import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsResponse;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.support.WriteRequest.RefreshPolicy;
+import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.NoNodeAvailableException;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
@@ -105,6 +103,8 @@ import com.floragunn.searchguard.action.whoami.WhoAmIResponse;
 import com.floragunn.searchguard.ssl.util.ExceptionUtils;
 import com.floragunn.searchguard.ssl.util.SSLConfigConstants;
 import com.floragunn.searchguard.support.ConfigConstants;
+import com.floragunn.searchguard.support.SearchGuardDeprecationHandler;
+import com.floragunn.searchguard.support.SgUtils;
 import com.google.common.io.Files;
 
 public class SearchGuardAdmin {
@@ -120,38 +120,43 @@ public class SearchGuardAdmin {
     
     public static void main(final String[] args) {
         try {
-            main0(args);
+            final int returnCode = execute(args);
+            System.exit(returnCode);
         } catch (NoNodeAvailableException e) {
             System.out.println("ERR: Cannot connect to Elasticsearch. Please refer to elasticsearch logfile for more information");
             System.out.println("Trace:");
-            e.printStackTrace();
+            System.out.println(ExceptionsHelper.stackTrace(e));
+            System.out.println();
             System.exit(-1);
         } 
         catch (IndexNotFoundException e) {
-            System.out.println("ERR: No Search Guard configuartion index found. Please execute sgadmin with different command line parameters");
+            System.out.println("ERR: No Search Guard configuration index found. Please execute sgadmin with different command line parameters");
             System.out.println("When you run it for the first time do not specify -us, -era, -dra or -rl");
-            System.out.println("For more information please look here: http://docs.search-guard.com/v6/troubleshooting-sgadmin");
+            System.out.println("For more information please look here: https://docs.search-guard.com/latest/troubleshooting-sgadmin");
+            System.out.println();
             System.exit(-1);
         }
-        catch (Exception e) {
+        catch (Throwable e) {
             
             if (e instanceof ElasticsearchException 
                     && e.getMessage() != null 
                     && e.getMessage().contains("no permissions")) {
 
-                System.out.println("ERR: You try to connect with a TLS node certificate instead of an admin client certificate");                
-                System.out.println("For more information please look here: http://docs.search-guard.com/v6/troubleshooting-sgadmin");
+                System.out.println("ERR: You try to connect with a TLS node certificate instead of an admin client certificate");
+                System.out.println("For more information please look here: https://docs.search-guard.com/latest/troubleshooting-sgadmin");
+                System.out.println();
                 System.exit(-1);
             }
             
             System.out.println("ERR: An unexpected "+e.getClass().getSimpleName()+" occured: "+e.getMessage());
             System.out.println("Trace:");
-            e.printStackTrace();
+            System.out.println(ExceptionsHelper.stackTrace(e));
+            System.out.println();
             System.exit(-1);
         }
     }
 
-    private static void main0(final String[] args) throws Exception {
+    public static int execute(final String[] args) throws Exception {
         
         System.out.println("Search Guard Admin v6");
         System.setProperty("sg.nowarn.client","true");
@@ -203,8 +208,13 @@ public class SearchGuardAdmin {
 
         options.addOption(Option.builder("w").longOpt("whoami").desc("Show information about the used admin certificate").build());
 
-        options.addOption(Option.builder("prompt").longOpt("prompt-for-password").desc("Promp for password if not supplied").build());
+        options.addOption(Option.builder("prompt").longOpt("prompt-for-password").desc("Prompt for password if not supplied").build());
 
+        options.addOption(Option.builder("er").longOpt("explicit-replicas").hasArg().argName("number of replicas").desc("Set explicit number of replicas or autoexpand expression for searchguard index").build());
+
+        options.addOption(Option.builder("rev").longOpt("resolve-env-vars").desc("Resolve/Substitute env vars in config with their value before uploading").build());
+
+        
         //when adding new options also adjust validate(CommandLine line)
         
         String hostname = "localhost";
@@ -247,6 +257,8 @@ public class SearchGuardAdmin {
         boolean si;
         boolean whoami;
         final boolean promptForPassword;
+        String explicitReplicas = null;
+        final boolean resolveEnvVars;
         
         CommandLineParser parser = new DefaultParser();
         try {
@@ -329,11 +341,15 @@ public class SearchGuardAdmin {
             
             whoami = line.hasOption("w");
             
+            explicitReplicas = line.getOptionValue("er", explicitReplicas);
+            
+            resolveEnvVars = line.hasOption("rev");
+            
         }
         catch( ParseException exp ) {
-            System.err.println("ERR: Parsing failed.  Reason: " + exp.getMessage());
+            System.out.println("ERR: Parsing failed.  Reason: " + exp.getMessage());
             formatter.printHelp("sgadmin.sh", options, true);
-            return;
+            return 0;
         }
         
         if(port < 9300) {
@@ -351,7 +367,7 @@ public class SearchGuardAdmin {
           } catch (java.net.ConnectException ex) {
             System.out.println();
             System.out.println("ERR: Seems there is no Elasticsearch running on "+hostname+":"+port+" - Will exit");
-            System.exit(-1);
+            return (-1);
           } finally {
               try {
                 socket.close();
@@ -456,43 +472,54 @@ public class SearchGuardAdmin {
                 } else {
                 	System.out.println("Seems you use a node certificate. This is not permitted, you have to use a client certificate and register it as admin_dn in elasticsearch.yml");
                 }
-                System.exit(-1);
+                return (-1);
             } else if(whoAmIRes.isNodeCertificateRequest()) {
                 System.out.println("ERR: Seems you use a node certificate which is also an admin certificate");
                 System.out.println("     That may have worked with older Search Guard versions but it indicates");
                 System.out.println("     a configuration error and is therefore forbidden now.");
-                System.out.println("     Pls refer to http://docs.search-guard.com/latest/tls-in-production");
+                System.out.println("     Pls refer to https://docs.search-guard.com/latest/tls-in-production");
                 
                 if(failFast) {
-                    System.exit(-1);
+                    return (-1);
                 }
 
             }
 
             if(updateSettings != null) { 
                 Settings indexSettings = Settings.builder().put("index.number_of_replicas", updateSettings).build();                
-                tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();                
-                final UpdateSettingsResponse response = tc.admin().indices().updateSettings((new UpdateSettingsRequest(index).settings(indexSettings))).actionGet();
+                ConfigUpdateResponse res = tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();                
+                if(res.hasFailures()) {
+                    System.out.println("ERR: Unabe to reload config due to "+res.failures());
+                }
+                final AcknowledgedResponse response = tc.admin().indices().updateSettings((new UpdateSettingsRequest(index).settings(indexSettings))).actionGet();
                 System.out.println("Reload config on all nodes");
                 System.out.println("Update number of replicas to "+(updateSettings) +" with result: "+response.isAcknowledged());
-                System.exit(response.isAcknowledged()?0:-1);
+                return ((response.isAcknowledged() && !res.hasFailures())?0:-1);
             }
             
             if(reload) { 
-                tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();                
+                ConfigUpdateResponse res = tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();                
+                if(res.hasFailures()) {
+                    System.out.println("ERR: Unabe to reload config due to "+res.failures());
+                    return -1;
+                }
                 System.out.println("Reload config on all nodes");
-                System.exit(0);
+                return 0;
             }
             
             if(si) { 
-                LicenseInfoResponse res = tc.execute(LicenseInfoAction.INSTANCE, new LicenseInfoRequest()).actionGet();                
+                LicenseInfoResponse res = tc.execute(LicenseInfoAction.INSTANCE, new LicenseInfoRequest()).actionGet();
+                if(res.hasFailures()) {
+                    System.out.println("ERR: Unabe to load license due to "+res.failures());
+                    return -1;
+                }
                 System.out.println(res.toString());
-                System.exit(0);
+                return (0);
             }
             
-            if(whoami) { 
+            if(whoami) {
                 System.out.println(whoAmIRes.toString());
-                System.exit(0);
+                return (0);
             }
             
             
@@ -500,11 +527,14 @@ public class SearchGuardAdmin {
                 Settings indexSettings = Settings.builder()
                         .put("index.auto_expand_replicas", replicaAutoExpand?"0-all":"false")
                         .build();                
-                tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();                
-                final UpdateSettingsResponse response = tc.admin().indices().updateSettings((new UpdateSettingsRequest(index).settings(indexSettings))).actionGet();
+                ConfigUpdateResponse res = tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();                
+                if(res.hasFailures()) {
+                    System.out.println("ERR: Unabe to reload config due to "+res.failures());
+                }
+                final AcknowledgedResponse response = tc.admin().indices().updateSettings((new UpdateSettingsRequest(index).settings(indexSettings))).actionGet();
                 System.out.println("Reload config on all nodes");
                 System.out.println("Auto-expand replicas "+(replicaAutoExpand?"enabled":"disabled"));
-                System.exit(response.isAcknowledged()?0:-1);
+                return ((response.isAcknowledged() && !res.hasFailures())?0:-1);
             }   
             
             if(enableShardAllocation) { 
@@ -521,7 +551,7 @@ public class SearchGuardAdmin {
                     System.out.println("ERR: Unable to enable shard allocation");
                 }
                 
-                System.exit(successful?0:-1);
+                return (successful?0:-1);
             }   
             
             if(failFast) {
@@ -563,7 +593,7 @@ public class SearchGuardAdmin {
                         System.out.println("   * If this is not working, try running sgadmin.sh with --diagnose and see diagnose trace log file)"); 
                         System.out.println("   * Add --accept-red-cluster to allow sgadmin to operate on a red cluster.");
 
-                        System.exit(-1);
+                        return (-1);
                     }
                     
                     Thread.sleep(3000);
@@ -579,7 +609,7 @@ public class SearchGuardAdmin {
                 System.out.println("   * Make also sure that your keystore or PEM certificate is a client certificate (not a node certificate) and configured properly in elasticsearch.yml"); 
                 System.out.println("   * If this is not working, try running sgadmin.sh with --diagnose and see diagnose trace log file)"); 
                 System.out.println("   * Add --accept-red-cluster to allow sgadmin to operate on a red cluster.");
-                System.exit(-1);
+                return (-1);
             }
             
             System.out.println("Clustername: "+chr.getClusterName());
@@ -608,7 +638,7 @@ public class SearchGuardAdmin {
                     System.out.print("No index '"+index+"' exists, so no need to delete it");
                 }
                 
-                System.exit(success?0:-1);
+                return (success?0:-1);
             }
                
             if (!indexExists) {
@@ -616,18 +646,27 @@ public class SearchGuardAdmin {
                 
                 Map<String, Object> indexSettings = new HashMap<>();
                 indexSettings.put("index.number_of_shards", 1);
-                indexSettings.put("index.auto_expand_replicas", "0-all");
                 
+                if(explicitReplicas != null) {
+                    if(explicitReplicas.contains("-")) {
+                        indexSettings.put("index.auto_expand_replicas", explicitReplicas);
+                    } else {
+                        indexSettings.put("index.number_of_replicas", Integer.parseInt(explicitReplicas));
+                    }
+                } else {
+                    indexSettings.put("index.auto_expand_replicas", "0-all");
+                }
+
                 final boolean indexCreated = tc.admin().indices().create(new CreateIndexRequest(index)
                 .settings(indexSettings))
                         .actionGet().isAcknowledged();
 
                 if (indexCreated) {
-                    System.out.println("done (auto expand replicas is on)");
+                    System.out.println("done ("+(explicitReplicas!=null?explicitReplicas:"0-all")+" replicas)");
                 } else {
                     System.out.println("failed!");
                     System.out.println("FAIL: Unable to create the "+index+" index. See elasticsearch logs for more details");
-                    System.exit(-1);
+                    return (-1);
                 }
 
             } else {
@@ -653,7 +692,7 @@ public class SearchGuardAdmin {
                         System.out.println("Cannot retrieve "+index+" index state state due to "+e.getMessage()+". This is not an error, will keep on trying ...");
                     } else {
                         System.out.println("ERR: Cannot retrieve "+index+" index state state due to "+e.getMessage()+".");
-                        System.exit(-1);
+                        return (-1);
                     }
                 }
             }
@@ -665,7 +704,7 @@ public class SearchGuardAdmin {
             
             if(legacy) {
                 System.out.println("Legacy index '"+index+"' detected.");
-                System.out.println("See http://docs.search-guard.com/v6/upgrading-5-6 for more details.");
+                System.out.println("See https://docs.search-guard.com/latest/upgrading-5-6 for more details.");
             }
             
             if(retrieve) {
@@ -676,7 +715,7 @@ public class SearchGuardAdmin {
                 success = retrieveFile(tc, cd+"sg_roles_mapping_"+date+".yml", index, "rolesmapping", legacy) && success;
                 success = retrieveFile(tc, cd+"sg_internal_users_"+date+".yml", index, "internalusers", legacy) && success;
                 success = retrieveFile(tc, cd+"sg_action_groups_"+date+".yml", index, "actiongroups", legacy) && success;
-                System.exit(success?0:-1);
+                return (success?0:-1);
             }
             
             boolean isCdAbs = new File(cd).isAbsolute();
@@ -686,32 +725,32 @@ public class SearchGuardAdmin {
             if(file != null) {
                 if(type == null) {
                     System.out.println("ERR: type missing");
-                    System.exit(-1);
+                    return (-1);
                 }
                 
                 if(!Arrays.asList(new String[]{"config", "roles", "rolesmapping", "internalusers","actiongroups" }).contains(type)) {
                     System.out.println("ERR: Invalid type '"+type+"'");
-                    System.exit(-1);
+                    return (-1);
                 }
                 
-                boolean success = uploadFile(tc, file, index, type, legacy);
+                boolean success = uploadFile(tc, file, index, type, legacy, resolveEnvVars);
                 ConfigUpdateResponse cur = tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{type})).actionGet();
                 
                 success = checkConfigUpdateResponse(cur, nodesInfo, 1) && success;
                 
                 System.out.println("Done with "+(success?"success":"failures"));
-                System.exit(success?0:-1);
+                return (success?0:-1);
             }
 
-            boolean success = uploadFile(tc, cd+"sg_config.yml", index, "config", legacy);
-            success = uploadFile(tc, cd+"sg_roles.yml", index, "roles", legacy) && success;
-            success = uploadFile(tc, cd+"sg_roles_mapping.yml", index, "rolesmapping", legacy) && success;
-            success = uploadFile(tc, cd+"sg_internal_users.yml", index, "internalusers", legacy) && success;
-            success = uploadFile(tc, cd+"sg_action_groups.yml", index, "actiongroups", legacy) && success;
+            boolean success = uploadFile(tc, cd+"sg_config.yml", index, "config", legacy, resolveEnvVars);
+            success = uploadFile(tc, cd+"sg_roles.yml", index, "roles", legacy, resolveEnvVars) && success;
+            success = uploadFile(tc, cd+"sg_roles_mapping.yml", index, "rolesmapping", legacy, resolveEnvVars) && success;
+            success = uploadFile(tc, cd+"sg_internal_users.yml", index, "internalusers", legacy, resolveEnvVars) && success;
+            success = uploadFile(tc, cd+"sg_action_groups.yml", index, "actiongroups", legacy, resolveEnvVars) && success;
             
             if(failFast && !success) {
                 System.out.println("ERR: cannot upload configuration, see errors above");
-                System.exit(-1);
+                return -1;
             }
             
             ConfigUpdateResponse cur = tc.execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(new String[]{"config","roles","rolesmapping","internalusers","actiongroups"})).actionGet();
@@ -719,7 +758,7 @@ public class SearchGuardAdmin {
             success = checkConfigUpdateResponse(cur, nodesInfo, 5) && success;
             
             System.out.println("Done with "+(success?"success":"failures"));
-            System.exit(success?0:-1);
+            return (success?0:-1);
         }
         // TODO audit changes to searchguard index
     }
@@ -737,9 +776,13 @@ public class SearchGuardAdmin {
             }           
         }
 
+        if(response.hasFailures()) {
+            System.out.println("FAIL: "+response.failures().size()+" nodes reported failures. First failure is "+response.failures().get(0));
+        }
+        
         boolean success = response.getNodes().size() == expectedNodeCount;
         if(!success) {
-            System.out.println("FAIL: Expected "+expectedNodeCount+" nodes to return response, but got only "+response.getNodes().size());
+            System.out.println("FAIL: Expected "+expectedNodeCount+" nodes to return response, but got "+response.getNodes().size());
         }
         
         for(String nodeId: response.getNodesMap().keySet()) {
@@ -747,16 +790,16 @@ public class SearchGuardAdmin {
             boolean successNode = (node.getUpdatedConfigTypes() != null && node.getUpdatedConfigTypes().length == expectedConfigCount);
             
             if(!successNode) {
-                System.out.println("FAIL: Expected "+expectedConfigCount+" config types for node "+nodeId+" but got only "+Arrays.toString(node.getUpdatedConfigTypes()) + " due to: "+node.getMessage()==null?"unknown reason":node.getMessage());
+                System.out.println("FAIL: Expected "+expectedConfigCount+" config types for node "+nodeId+" but got "+Arrays.toString(node.getUpdatedConfigTypes()) + " due to: "+(node.getMessage()==null?"unknown reason":node.getMessage()));
             }
             
             success = success && successNode;
         }
-        
-        return success;
+
+        return success && !response.hasFailures();
     }
     
-    private static boolean uploadFile(final Client tc, final String filepath, final String index, final String _id, final boolean legacy) {
+    private static boolean uploadFile(final Client tc, final String filepath, final String index, final String _id, final boolean legacy, boolean resolveEnvVars) {
         
         String type = "sg";
         String id = _id;
@@ -767,12 +810,12 @@ public class SearchGuardAdmin {
         }
         
         System.out.println("Will update '"+type+"/" + id + "' with " + filepath+" "+(legacy?"(legacy mode)":""));
-        
-        try (Reader reader = new FileReader(filepath)) {
 
+        try {
+            final String content = Files.asCharSource(new File(filepath), StandardCharsets.UTF_8).read();
             final String res = tc
                     .index(new IndexRequest(index).type(type).id(id).setRefreshPolicy(RefreshPolicy.IMMEDIATE)
-                            .source(_id, readXContent(reader, XContentType.YAML))).actionGet().getId();
+                            .source(_id, readXContent(resolveEnvVars?SgUtils.replaceEnvVars(content, Settings.EMPTY):content, XContentType.YAML))).actionGet().getId();
 
             if (id.equals(res)) {
                 System.out.println("   SUCC: Configuration for '" + _id + "' created or updated");
@@ -823,15 +866,15 @@ public class SearchGuardAdmin {
         return false;
     }
 
-    private static BytesReference readXContent(final Reader reader, final XContentType xContentType) throws IOException {
+    private static BytesReference readXContent(final String content, final XContentType xContentType) throws IOException {
         BytesReference retVal;
         XContentParser parser = null;
         try {
-            parser = XContentFactory.xContent(xContentType).createParser(NamedXContentRegistry.EMPTY, reader);
+            parser = XContentFactory.xContent(xContentType).createParser(NamedXContentRegistry.EMPTY, SearchGuardDeprecationHandler.INSTANCE, content);
             parser.nextToken();
             final XContentBuilder builder = XContentFactory.jsonBuilder();
             builder.copyCurrentStructure(parser);
-            retVal = builder.bytes();
+            retVal = BytesReference.bytes(builder);
         } finally {
             if (parser != null) {
                 parser.close();
@@ -845,7 +888,7 @@ public class SearchGuardAdmin {
     
     private static String convertToYaml(String type, BytesReference bytes, boolean prettyPrint) throws IOException {
         
-        try (XContentParser parser = JsonXContent.jsonXContent.createParser(NamedXContentRegistry.EMPTY, bytes.streamInput())) {
+        try (XContentParser parser = JsonXContent.jsonXContent.createParser(NamedXContentRegistry.EMPTY, SearchGuardDeprecationHandler.INSTANCE, bytes.streamInput())) {
             
             parser.nextToken();
             parser.nextToken();
@@ -860,8 +903,8 @@ public class SearchGuardAdmin {
             if (prettyPrint) {
                 builder.prettyPrint();
             }
-            builder.rawValue(new BytesArray(parser.binaryValue()), XContentType.YAML);
-            return builder.string();
+            builder.rawValue(new ByteArrayInputStream(parser.binaryValue()), XContentType.YAML);
+            return Strings.toString(builder);
         }
     }
 
@@ -978,10 +1021,6 @@ public class SearchGuardAdmin {
         
         if(line.hasOption("cd") && line.hasOption("f")) {
             System.out.println("WARN: It makes no sense to specify -cd as well as -f");
-        }
-        
-        if(line.hasOption("cd") && line.hasOption("r")) {
-            System.out.println("WARN: It makes no sense to specify -cd as well as -r");
         }
         
         if(line.hasOption("cn") && line.hasOption("icl")) {

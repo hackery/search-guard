@@ -2,12 +2,36 @@ sg_public:
   cluster:
     - 'cluster:monitor/main'
     #- CLUSTER_COMPOSITE_OPS_RO
+  indices:
+    '.notexistingindexcvnjl9809991':
+      '*':  
+        - ALL
 
 sg_all_access:
   cluster:
     - '*'
   indices:
     '*':
+      '*':  
+        - ALL
+    '.notexistingindexcvnjl9809991':
+      '*':  
+        - ALL
+        
+sg_env_test:
+  cluster:
+    - '*'
+  indices:
+    '${env.INDEXNAME1:-index1}':
+      '*':  
+        - ALL
+    '${env.INDEXNAME2:-index2}':
+      '*':  
+        - ALL
+    '${user_name}':
+      '*':  
+        - ALL
+    '${env.INDEXNAME3}':
       '*':  
         - ALL
         
@@ -26,9 +50,15 @@ sg_zdummy_all:
     '*':
       '*':  
         - ALL
+  tenants:
+    admin_1: Rw
+    abcdef_2_2: RO
 
 sg_role_klingons1:
   indices:
+    '*':
+      '*':
+        - indices:admin/shards/search_shards
     klingonempire:
       ships:  
         - READ
@@ -351,6 +381,9 @@ sg_twitter:
     'twitter':
       '*':
         - '*'
+    'analytics':
+      '*':
+        - '*'
         
 sg_aliasmngt:
   indices:
@@ -360,6 +393,35 @@ sg_aliasmngt:
         - indices:data/read/*
         - CREATE_INDEX
         - indices:admin/aliases*
+        
+sg_ua:
+  cluster:
+    - '*'
+  indices:
+    'indexa*':
+      '*':
+        - '*'
+    'permitnotexistentindex*':
+      '*':
+        - '*'
+    '*':
+      '*':
+        - indices:data/read/field_caps
+sg_ub:
+  cluster:
+    - '*'
+  indices:
+    'indexb':
+      '*':
+        - '*'
+        
+sg_uc:
+  cluster:
+    - '*'
+  indices:
+    'indexc':
+      'typec':
+        - '*'
     'beats-*':
       '*':
         - indices:data/write/*
@@ -416,3 +478,88 @@ sg_ccsresolv:
     '?abc*':
       '*':
         - 'indices:data/read/*'
+
+sg_ccsresolv1:
+  indices:
+    '?abc*':
+      '*':
+        - 'indices:data/read/*'
+    'xyz':
+      '*':
+        - 'indices:data/read/*'
+    '*noexist':
+      '*':
+        - 'indices:data/read/*'
+        
+sg_underscore:
+  cluster:
+    - '*'
+  indices:
+    '*abc_xyz_*':
+      '*':
+        - '*'
+
+sg_557:
+  cluster:
+    - '*'
+  indices:    
+    '/\S*/':
+      '*':
+        - READ
+        
+sg_kibana_server:
+  readonly: true
+  cluster:
+      - CLUSTER_MONITOR
+      - CLUSTER_COMPOSITE_OPS
+      - cluster:admin/xpack/monitoring*
+      - indices:admin/template*
+      - indices:data/read/scroll*
+  indices:
+    '?kibana':
+      '*':
+        - INDICES_ALL
+    '?kibana-6':
+      '*':
+        - INDICES_ALL
+    '?kibana_*':
+      '*':
+        - INDICES_ALL
+    '?reporting*':
+      '*':
+        - INDICES_ALL
+    '?monitoring*':
+      '*':
+        - INDICES_ALL
+    '?tasks':
+      '*':
+        - INDICES_ALL
+    '*':
+      '*':
+        - "indices:admin/aliases*"
+
+sg_remote_ccs:
+  indices:
+    '*':
+      '*':
+        - indices:admin/shards/search_shards
+        
+sg_role_foo_index:
+  cluster:
+    - '*'
+  indices:
+    'foo-index':
+      '*':
+        - indices:data/read/*
+        - indices:admin/*
+        - indices:monitor/*
+        
+sg_role_foo_all:
+  cluster:
+    - '*'
+  indices:
+    'foo-*':
+      '*':
+        - indices:data/read/*
+        - indices:admin/*
+        - indices:monitor/*

@@ -26,11 +26,11 @@ import java.util.stream.Collectors;
 import org.elasticsearch.action.FailedNodeException;
 import org.elasticsearch.action.support.nodes.BaseNodesResponse;
 import org.elasticsearch.cluster.ClusterName;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentFactory;
 
 import com.floragunn.searchguard.configuration.SearchGuardLicense;
 import com.floragunn.searchguard.support.ModuleInfo;
@@ -74,6 +74,7 @@ public class LicenseInfoResponse extends BaseNodesResponse<LicenseInfoNodeRespon
             
             builder.field("uid", license.getUid());
             builder.field("type", license.getType());
+            builder.field("features", license.getFeatures());
             builder.field("issue_date", license.getIssueDate());
             builder.field("expiry_date", license.getExpiryDate());
             builder.field("issued_to", license.getIssuedTo());
@@ -99,6 +100,7 @@ public class LicenseInfoResponse extends BaseNodesResponse<LicenseInfoNodeRespon
                  
             builder.field("uid", license.getUid());
             builder.field("type", license.getType());
+            builder.field("features", license.getFeatures());
             builder.field("issue_date", license.getIssueDate());
             builder.field("expiry_date", license.getExpiryDate());
             builder.field("issued_to", license.getIssuedTo());
@@ -154,14 +156,6 @@ public class LicenseInfoResponse extends BaseNodesResponse<LicenseInfoNodeRespon
 
     @Override
     public String toString() {
-        try {
-            XContentBuilder builder = XContentFactory.jsonBuilder().prettyPrint();
-            builder.startObject();
-            toXContent(builder, EMPTY_PARAMS);
-            builder.endObject();
-            return builder.string();
-        } catch (IOException e) {
-            return "{ \"error\" : \"" + e.getMessage() + "\"}";
-        }
+        return Strings.toString(this, true, true);
     }
 }

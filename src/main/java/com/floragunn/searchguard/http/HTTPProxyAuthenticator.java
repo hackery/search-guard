@@ -19,10 +19,10 @@ package com.floragunn.searchguard.http;
 
 import java.nio.file.Path;
 
-import org.elasticsearch.ElasticsearchSecurityException;
-import org.elasticsearch.common.Strings;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.elasticsearch.ElasticsearchSecurityException;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.rest.RestChannel;
@@ -51,7 +51,8 @@ public class HTTPProxyAuthenticator implements HTTPAuthenticator {
         
         final String userHeader = settings.get("user_header");
         final String rolesHeader = settings.get("roles_header");
-
+        final String rolesSeparator = settings.get("roles_separator", ",");
+        
         if(log.isDebugEnabled()) {
             log.debug("headers {}", request.getHeaders());
             log.debug("userHeader {}, value {}", userHeader, userHeader == null?null:request.header(userHeader));
@@ -63,7 +64,7 @@ public class HTTPProxyAuthenticator implements HTTPAuthenticator {
             String[] backendRoles = null;
 
             if (!Strings.isNullOrEmpty(rolesHeader) && !Strings.isNullOrEmpty((String) request.header(rolesHeader))) {
-                backendRoles = ((String) request.header(rolesHeader)).split(",");
+                backendRoles = ((String) request.header(rolesHeader)).split(rolesSeparator);
             }
             return new AuthCredentials((String) request.header(userHeader), backendRoles).markComplete();
         } else {

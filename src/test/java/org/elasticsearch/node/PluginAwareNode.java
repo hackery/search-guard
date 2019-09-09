@@ -18,14 +18,37 @@
 package org.elasticsearch.node;
 
 import java.util.Arrays;
+import java.util.Random;
 
+import org.elasticsearch.common.logging.LogConfigurator;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.plugins.Plugin;
 
 public class PluginAwareNode extends Node {
+    
+    private final boolean masterEligible;
 
     @SafeVarargs
-    public PluginAwareNode(final Settings preparedSettings, final Class<? extends Plugin>... plugins) {
-        super(InternalSettingsPreparer.prepareEnvironment(preparedSettings, null), Arrays.asList(plugins));
+    public PluginAwareNode(boolean masterEligible, final Settings preparedSettings, final Class<? extends Plugin>... plugins) {
+        super(InternalSettingsPreparer.prepareEnvironment(checkAndAddNodeName(preparedSettings), null), Arrays.asList(plugins), true);
+        this.masterEligible = masterEligible;
+    }
+    
+    @Override
+    protected void registerDerivedNodeNameWithLogger(String nodeName) {
+        LogConfigurator.setNodeName(nodeName);
+    }
+
+    public boolean isMasterEligible() {
+        return masterEligible;
+    }
+    
+    private static Settings checkAndAddNodeName(final Settings settings) {
+    	if(!settings.hasValue("node.name")) {
+    		return Settings.builder().put(settings).put("node.name", "auto_node_name_"+System.currentTimeMillis()+"_"+ new Random().nextInt()).build();
+    	}
+    	
+    	return settings;
+    	
     }
 }

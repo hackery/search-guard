@@ -17,7 +17,8 @@
 
 package com.floragunn.searchguard.rest;
 
-import static org.elasticsearch.rest.RestRequest.Method.*;
+import static org.elasticsearch.rest.RestRequest.Method.GET;
+import static org.elasticsearch.rest.RestRequest.Method.POST;
 
 import java.io.IOException;
 
@@ -36,7 +37,7 @@ import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.threadpool.ThreadPool;
 
-import com.floragunn.searchguard.configuration.PrivilegesEvaluator;
+import com.floragunn.searchguard.privileges.PrivilegesEvaluator;
 import com.floragunn.searchguard.support.ConfigConstants;
 import com.floragunn.searchguard.user.User;
 
@@ -46,12 +47,13 @@ public class KibanaInfoAction extends BaseRestHandler {
     private final PrivilegesEvaluator evaluator;
     private final ThreadContext threadContext;
 
-    public KibanaInfoAction(final Settings settings, final RestController controller, final PrivilegesEvaluator evaluator, final ThreadPool threadPool) {
+    public KibanaInfoAction(final Settings settings, final RestController controller, final PrivilegesEvaluator evaluator,
+            final ThreadPool threadPool) {
         super(settings);
         this.threadContext = threadPool.getThreadContext();
         this.evaluator = evaluator;
         controller.registerHandler(GET, "/_searchguard/kibanainfo", this);
-        controller.registerHandler(POST, "/_searchguard/kibanainfo", this);       
+        controller.registerHandler(POST, "/_searchguard/kibanainfo", this);
     }
 
     @Override
@@ -62,31 +64,31 @@ public class KibanaInfoAction extends BaseRestHandler {
             public void accept(RestChannel channel) throws Exception {
                 XContentBuilder builder = channel.newBuilder(); //NOSONAR
                 BytesRestResponse response = null;
-                
+
                 try {
-                    
-                    final User user = (User)threadContext.getTransient(ConfigConstants.SG_USER);
+
+                    final User user = (User) threadContext.getTransient(ConfigConstants.SG_USER);
                     final TransportAddress remoteAddress = (TransportAddress) threadContext.getTransient(ConfigConstants.SG_REMOTE_ADDRESS);
 
                     builder.startObject();
-                    builder.field("user_name", user==null?null:user.getName());
+                    builder.field("user_name", user == null ? null : user.getName());
                     builder.field("not_fail_on_forbidden_enabled", evaluator.notFailOnForbiddenEnabled());
                     builder.field("kibana_mt_enabled", evaluator.multitenancyEnabled());
                     builder.field("kibana_index", evaluator.kibanaIndex());
                     builder.field("kibana_server_user", evaluator.kibanaServerUsername());
-                    builder.field("kibana_index_readonly", evaluator.kibanaIndexReadonly(user, remoteAddress));
+                    //builder.field("kibana_index_readonly", evaluator.kibanaIndexReadonly(user, remoteAddress));
                     builder.endObject();
 
                     response = new BytesRestResponse(RestStatus.OK, builder);
                 } catch (final Exception e1) {
-                    log.error(e1.toString(),e1);
+                    log.error(e1.toString(), e1);
                     builder = channel.newBuilder(); //NOSONAR
                     builder.startObject();
                     builder.field("error", e1.toString());
                     builder.endObject();
                     response = new BytesRestResponse(RestStatus.INTERNAL_SERVER_ERROR, builder);
                 } finally {
-                    if(builder != null) {
+                    if (builder != null) {
                         builder.close();
                     }
                 }
@@ -100,6 +102,5 @@ public class KibanaInfoAction extends BaseRestHandler {
     public String getName() {
         return "Kibana Info Action";
     }
-    
-    
+
 }

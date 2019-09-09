@@ -18,26 +18,32 @@
 package com.floragunn.searchguard.configuration;
 
 import java.io.IOException;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.Period;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
 
+import com.floragunn.searchguard.support.SgUtils;
+
 public final class SearchGuardLicense implements Writeable {
 
+    private static final DateTimeFormatter DEFAULT_FOMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd").withLocale(SgUtils.EN_Locale);
+    
     private String uid;
     private Type type;
+    private Feature[] features;
     private String issueDate;
     private String expiryDate;
     private String issuedTo;
@@ -55,7 +61,7 @@ public final class SearchGuardLicense implements Writeable {
     private final ClusterService clusterService;
     
     public static SearchGuardLicense createTrialLicense(String issueDate, ClusterService clusterService, String msg) {
-        final SearchGuardLicense trialLicense =  new SearchGuardLicense("00000000-0000-0000-0000-000000000000", Type.TRIAL, issueDate, addDays(issueDate, 61L), "The world", "floragunn GmbH", issueDate, 6, "*", Integer.MAX_VALUE, clusterService);
+        final SearchGuardLicense trialLicense =  new SearchGuardLicense("00000000-0000-0000-0000-000000000000", Type.TRIAL, Feature.values(), issueDate, addDays(issueDate, 60), "The world", "floragunn GmbH", issueDate, 6, "*", Integer.MAX_VALUE, clusterService);
         if(msg != null) {
             trialLicense.msgs.add(msg);
         }
@@ -74,12 +80,13 @@ public final class SearchGuardLicense implements Writeable {
         out.writeOptionalVInt(majorVersion);
         out.writeString(clusterName);
         out.writeInt(allowedNodeCount);
-        out.writeStringList(msgs);
+        out.writeStringCollection(msgs);
         out.writeLong(expiresInDays);
         out.writeBoolean(isExpired);
         out.writeBoolean(valid);
         out.writeString(action);
         out.writeString(prodUsage);
+        out.writeArray(StreamOutput::writeEnum, features==null?new Feature[0]:features);
     }
     
     public SearchGuardLicense(final StreamInput in) throws IOException {
@@ -99,13 +106,22 @@ public final class SearchGuardLicense implements Writeable {
         valid = in.readBoolean();
         action = in.readString();
         prodUsage = in.readString();
+        features = in.readArray(new Reader<Feature>() {
+
+            @Override
+            public Feature read(StreamInput in) throws IOException {
+                return in.readEnum(Feature.class);
+            }}, Feature[]::new);
+
         clusterService = null;
+        
     }
 
     public SearchGuardLicense(final Map<String, Object> map, ClusterService clusterService) {
         this(
                  (String) (map==null?null:map.get("uid")),
                  (Type)   (map==null?null:Type.valueOf(((String)map.get("type")).toUpperCase())),
+                 (map==null?null:parseFeatures((List<String>) map.get("features"))),
                  (String) (map==null?null:map.get("issued_date")),
                  (String) (map==null?null:map.get("expiry_date")),
                  (String) (map==null?null:map.get("issued_to")),
@@ -118,10 +134,32 @@ public final class SearchGuardLicense implements Writeable {
         );
     }
     
-    public SearchGuardLicense(String uid, Type type, String issueDate, String expiryDate, String issuedTo, String issuer, String startDate, Integer majorVersion, String clusterName, int allowedNodeCount,  ClusterService clusterService) {
+    private final static Feature[] parseFeatures(List<String> featuresAsString) {
+        if(featuresAsString == null || featuresAsString.isEmpty()) {
+            return new Feature[0];
+        }
+        
+        List<Feature> retVal = new ArrayList<SearchGuardLicense.Feature>();
+        
+        for(String feature: featuresAsString) {
+            if(feature != null && !feature.isEmpty()) {
+                try {
+                    retVal.add(Feature.valueOf(feature.toUpperCase()));
+                } catch (Exception e) {
+                    //no such feature
+                }
+            }
+            
+        }
+        
+        return retVal.toArray(new Feature[0]);
+    }
+    
+    public SearchGuardLicense(String uid, Type type, Feature[] features, String issueDate, String expiryDate, String issuedTo, String issuer, String startDate, Integer majorVersion, String clusterName, int allowedNodeCount,  ClusterService clusterService) {
         super();
         this.uid = Objects.requireNonNull(uid);
         this.type = Objects.requireNonNull(type);
+        this.features = features==null?new Feature[0]:features.clone();
         this.issueDate = Objects.requireNonNull(issueDate);
         this.expiryDate = Objects.requireNonNull(expiryDate);
         this.issuedTo = Objects.requireNonNull(issuedTo);
@@ -135,7 +173,8 @@ public final class SearchGuardLicense implements Writeable {
     }
     
     private void validate() {    
-        final Date now = new Date();
+        
+        final LocalDate today = LocalDate.now();
         
         if(uid == null || uid.isEmpty()) {
             valid = false;
@@ -148,30 +187,32 @@ public final class SearchGuardLicense implements Writeable {
         }
         
         try {
-            Date isd = parseDate(issueDate);
+            final LocalDate isd = parseDate(issueDate);
             
-            if(isd.after(now)) {
+            if(isd.isAfter(today)) {
                 valid = false;
                 msgs.add("License not valid yet.");
             }
             
         } catch (Exception e) {
+            e.printStackTrace();
             valid = false;
             msgs.add("'issued_date' not valid");
         }
         
         try {
-            Date exd = parseDate(expiryDate);
+            final LocalDate exd = parseDate(expiryDate);
             
-            if(exd.before(now)) {
+            if(exd.isBefore(today)) {
                 valid = false;
                 msgs.add("License is expired");
             } else {
                 isExpired = false;
-                expiresInDays = TimeUnit.DAYS.convert(exd.getTime()-now.getTime(), TimeUnit.MILLISECONDS); 
+                expiresInDays = diffDays(exd);
             }
             
         } catch (Exception e) {
+            e.printStackTrace();
             valid = false;
             msgs.add("'expiry_date' not valid");
         }
@@ -196,6 +237,7 @@ public final class SearchGuardLicense implements Writeable {
         try {
             parseDate(startDate);
         } catch (Exception e) {
+            e.printStackTrace();
             valid = false;
             msgs.add("'start_date' not valid");
         }
@@ -245,17 +287,22 @@ public final class SearchGuardLicense implements Writeable {
         TRIAL,
         COMPANY
     }
+    
+    public enum Feature {
+        COMPLIANCE
+    }
    
-    private static Date parseDate(String date) throws ParseException {
-        return new SimpleDateFormat("yyyy-MM-dd").parse(date);
+    private static LocalDate parseDate(String date) {
+        return LocalDate.parse(date, DEFAULT_FOMATTER);
     }
     
-    private static String addDays(String date, long days) {
-        try {
-            return new SimpleDateFormat("yyyy-MM-dd").format(new Date(parseDate(date).getTime()+(days*1000L*60L*60L*24L)));
-        } catch (Exception e) {
-            return e.toString();
-        } 
+    private static String addDays(String date, int days) {
+        final LocalDate d = parseDate(date);
+        return DEFAULT_FOMATTER.format(d.plus(Period.ofDays(days)));
+    }
+    
+    private static long diffDays(LocalDate to) {  
+        return ChronoUnit.DAYS.between(LocalDate.now(), to);
     }
 
     public String getUid() {
@@ -321,10 +368,21 @@ public final class SearchGuardLicense implements Writeable {
     public int getAllowedNodeCount() {
         return allowedNodeCount;
     }
+    
+    public Feature[] getFeatures() {
+        return features==null?null:features.clone();
+    }
+    
+    public boolean hasFeature(Feature feature) {
+        if(features == null || features.length == 0) {
+            return false;
+        }
+        return Arrays.asList(features).contains(feature);
+    }
 
     @Override
     public String toString() {
-        return "SearchGuardLicense [uid=" + uid + ", type=" + type + ", issueDate=" + issueDate + ", expiryDate=" + expiryDate
+        return "SearchGuardLicense [uid=" + uid + ", type=" + type + ", features=" + Arrays.toString(features) + ", issueDate=" + issueDate + ", expiryDate=" + expiryDate
                 + ", issuedTo=" + issuedTo + ", issuer=" + issuer + ", startDate=" + startDate + ", majorVersion=" + majorVersion
                 + ", clusterName=" + clusterName + ", allowedNodeCount=" + allowedNodeCount + ", msgs=" + msgs + ", expiresInDays="
                 + expiresInDays + ", isExpired=" + isExpired + ", valid=" + valid + ", action=" + action + ", prodUsage=" + prodUsage

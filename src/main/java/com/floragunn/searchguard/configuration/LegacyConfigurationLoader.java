@@ -17,8 +17,8 @@
 
 package com.floragunn.searchguard.configuration;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -37,6 +37,7 @@ import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.get.MultiGetResponse.Failure;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
 import org.elasticsearch.common.xcontent.XContentHelper;
@@ -45,30 +46,32 @@ import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import com.floragunn.searchguard.support.ConfigConstants;
+import com.floragunn.searchguard.support.SearchGuardDeprecationHandler;
+import com.floragunn.searchguard.support.SgUtils;
 
 class LegacyConfigurationLoader {
 
     protected final Logger log = LogManager.getLogger(this.getClass());
     private final Client client;
-    //private final ThreadContext threadContext;
+    private final Settings settings;
     private final String searchguardIndex;
     
     LegacyConfigurationLoader(final Client client, ThreadPool threadPool, final Settings settings) {
         super();
         this.client = client;
-        //this.threadContext = threadPool.getThreadContext();
+        this.settings = settings;
         this.searchguardIndex = settings.get(ConfigConstants.SEARCHGUARD_CONFIG_INDEX_NAME, ConfigConstants.SG_DEFAULT_CONFIG_INDEX);
         log.debug("Index is: {}", searchguardIndex);
     }
     
-    Map<String, Settings> loadLegacy(final String[] events, long timeout, TimeUnit timeUnit) throws InterruptedException, TimeoutException {
+    Map<String, Tuple<Long, Settings>> loadLegacy(final String[] events, long timeout, TimeUnit timeUnit) throws InterruptedException, TimeoutException {
         final CountDownLatch latch = new CountDownLatch(events.length);
-        final Map<String, Settings> rs = new HashMap<String, Settings>(events.length);
+        final Map<String, Tuple<Long, Settings>> rs = new HashMap<String, Tuple<Long, Settings>>(events.length);
         
         loadAsyncLegacy(events, new ConfigCallback() {
             
             @Override
-            public void success(String type, Settings settings) {
+            public void success(String type, Tuple<Long, Settings> settings) {
                 if(latch.getCount() <= 0) {
                     log.error("Latch already counted down (for {} of {})  (index={})", type, Arrays.toString(events), searchguardIndex);
                 }
@@ -133,8 +136,8 @@ class LegacyConfigurationLoader {
                             GetResponse singleGetResponse = singleResponse.getResponse();
                             if(singleGetResponse.isExists() && !singleGetResponse.isSourceEmpty()) {
                                 //success
-                                final Settings _settings = toSettings(singleGetResponse.getSourceAsBytesRef(), singleGetResponse.getType());
-                                if(_settings != null) {
+                                final Tuple<Long, Settings> _settings = toSettings(singleGetResponse);
+                                if(_settings.v2() != null) {
                                     callback.success(singleGetResponse.getType(), _settings);
                                 } else {
                                     log.error("Cannot parse settings for "+singleGetResponse.getType());
@@ -158,7 +161,10 @@ class LegacyConfigurationLoader {
         }
     }
 
-    private Settings toSettings(final BytesReference ref, final String type) {
+    private Tuple<Long, Settings> toSettings(GetResponse singleGetResponse) {
+        final BytesReference ref = singleGetResponse.getSourceAsBytesRef();
+        final String type = singleGetResponse.getType();
+        final long version = singleGetResponse.getVersion();
         if (ref == null || ref.length() == 0) {
             log.error("Empty or null byte reference for {}", type);
             return null;
@@ -167,7 +173,7 @@ class LegacyConfigurationLoader {
         XContentParser parser = null;
 
         try {
-            parser = XContentHelper.createParser(NamedXContentRegistry.EMPTY, ref, XContentType.JSON);
+            parser = XContentHelper.createParser(NamedXContentRegistry.EMPTY, SearchGuardDeprecationHandler.INSTANCE, ref, XContentType.JSON);
             parser.nextToken();
             parser.nextToken();
          
@@ -177,13 +183,19 @@ class LegacyConfigurationLoader {
             }
             
             parser.nextToken();
-            
-            return Settings.builder().loadFromStream("dummy.json", new ByteArrayInputStream(parser.binaryValue()), true).build();
+
+            final byte[] content = parser.binaryValue();
+
+            return new Tuple<Long, Settings>(version, Settings.builder().loadFromSource(SgUtils.replaceEnvVars(new String(content, StandardCharsets.UTF_8), settings), XContentType.JSON).build());
         } catch (final IOException e) {
             throw ExceptionsHelper.convertToElastic(e);
         } finally {
             if(parser != null) {
-                parser.close();
+                try {
+                    parser.close();
+                } catch (IOException e) {
+                    //ignore
+                }
             }
         }
     }

@@ -27,12 +27,16 @@ import com.floragunn.searchguard.test.helper.cluster.ClusterInfo;
 import com.floragunn.searchguard.test.helper.rest.RestHelper;
 
 public abstract class SingleClusterTest extends AbstractSGUnitTest {
-    
-    protected ClusterHelper clusterHelper = new ClusterHelper("unittest_cluster_1");
+        
+    protected ClusterHelper clusterHelper = new ClusterHelper("utest_n"+num.incrementAndGet()+"_f"+System.getProperty("forkno")+"_t"+System.nanoTime());
     protected ClusterInfo clusterInfo;
     
     protected void setup(Settings nodeOverride) throws Exception {    
         setup(Settings.EMPTY, new DynamicSgConfig(), nodeOverride, true);
+    }
+    
+    protected void setup(Settings nodeOverride, ClusterConfiguration clusterConfiguration) throws Exception {    
+        setup(Settings.EMPTY, new DynamicSgConfig(), nodeOverride, true, clusterConfiguration);
     }
     
     protected void setup() throws Exception {    
@@ -43,23 +47,42 @@ public abstract class SingleClusterTest extends AbstractSGUnitTest {
         setup(initTransportClientSettings, dynamicSgSettings, nodeOverride, true);
     }
     
-    protected void setup(Settings initTransportClientSettings, DynamicSgConfig dynamicSgSettings, Settings nodeOverride, boolean initSeachGuardIndex) throws Exception {    
-        setup(initTransportClientSettings, dynamicSgSettings, nodeOverride, initSeachGuardIndex, ClusterConfiguration.DEFAULT);
+    protected void setup(Settings initTransportClientSettings, DynamicSgConfig dynamicSgSettings, Settings nodeOverride, boolean initSearchGuardIndex) throws Exception {    
+        setup(initTransportClientSettings, dynamicSgSettings, nodeOverride, initSearchGuardIndex, ClusterConfiguration.DEFAULT);
     }
     
-    protected void setup(Settings initTransportClientSettings, DynamicSgConfig dynamicSgSettings, Settings nodeOverride, boolean initSeachGuardIndex, ClusterConfiguration clusterConfiguration) throws Exception {    
-        clusterInfo = clusterHelper.startCluster(minimumSearchGuardSettings(nodeOverride), clusterConfiguration);
-        if(initSeachGuardIndex && dynamicSgSettings != null) {
+    ClusterHelper remoteClusterHelper = null;
+    private Settings ccs(Settings nodeOverride) throws Exception {
+        if(withRemoteCluster) {
+        remoteClusterHelper = new ClusterHelper("crl2_n"+num.incrementAndGet()+"_f"+System.getProperty("forkno")+"_t"+System.nanoTime());
+        ClusterInfo cl2Info = remoteClusterHelper.startCluster(minimumSearchGuardSettings(Settings.EMPTY), ClusterConfiguration.SINGLENODE);
+        Settings.Builder builder = Settings.builder()
+                .put(nodeOverride)
+                .putList("search.remote.cross_cluster_two.seeds", cl2Info.nodeHost+":"+cl2Info.nodePort);
+        return builder.build();
+        } else {
+            return nodeOverride;
+        }
+    }
+    
+    
+    protected void setup(Settings initTransportClientSettings, DynamicSgConfig dynamicSgSettings, Settings nodeOverride, boolean initSearchGuardIndex, ClusterConfiguration clusterConfiguration) throws Exception {    
+        clusterInfo = clusterHelper.startCluster(minimumSearchGuardSettings(ccs(nodeOverride)), clusterConfiguration);
+        if(initSearchGuardIndex && dynamicSgSettings != null) {
             initialize(clusterInfo, initTransportClientSettings, dynamicSgSettings);
         }
     }
     
     protected void setup(Settings initTransportClientSettings, DynamicSgConfig dynamicSgSettings, Settings nodeOverride
-            , boolean initSeachGuardIndex, ClusterConfiguration clusterConfiguration, int timeout, Integer nodes) throws Exception {    
-        clusterInfo = clusterHelper.startCluster(minimumSearchGuardSettings(nodeOverride), clusterConfiguration, timeout, nodes);
-        if(initSeachGuardIndex) {
+            , boolean initSearchGuardIndex, ClusterConfiguration clusterConfiguration, int timeout, Integer nodes) throws Exception {    
+        clusterInfo = clusterHelper.startCluster(minimumSearchGuardSettings(ccs(nodeOverride)), clusterConfiguration, timeout, nodes);
+        if(initSearchGuardIndex) {
             initialize(clusterInfo, initTransportClientSettings, dynamicSgSettings);
         }
+    }
+    
+    protected void setupSslOnlyMode(Settings nodeOverride) throws Exception {    
+        clusterInfo = clusterHelper.startCluster(minimumSearchGuardSettingsSslOnly(nodeOverride), ClusterConfiguration.DEFAULT);
     }
     
     protected RestHelper restHelper() {
@@ -76,6 +99,11 @@ public abstract class SingleClusterTest extends AbstractSGUnitTest {
        
     @After
     public void tearDown() throws Exception {
+        
+        if(remoteClusterHelper != null) {
+            remoteClusterHelper.stopCluster();
+        }
+        
         if(clusterInfo != null) {
             clusterHelper.stopCluster();
         }

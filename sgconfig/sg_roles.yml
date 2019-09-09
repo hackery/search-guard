@@ -78,7 +78,7 @@ sg_readall_and_monitor:
 sg_kibana_user:
   readonly: true
   cluster:
-    - MONITOR
+    - INDICES_MONITOR
     - CLUSTER_COMPOSITE_OPS
   indices:
     '?kibana':
@@ -93,9 +93,24 @@ sg_kibana_user:
         - INDEX
         - READ
         - DELETE
+    '?kibana_*':
+      '*':
+        - MANAGE
+        - INDEX
+        - READ
+        - DELETE
+    '?tasks':
+      '*':
+        - INDICES_ALL
+    '?management-beats':
+      '*':
+        - INDICES_ALL        
     '*':
       '*':
         - indices:data/read/field_caps*
+        - indices:data/read/xpack/rollup*
+        - indices:admin/mappings/get*
+        - indices:admin/get
 
 # For the kibana server
 sg_kibana_server:
@@ -105,11 +120,15 @@ sg_kibana_server:
       - CLUSTER_COMPOSITE_OPS
       - cluster:admin/xpack/monitoring*
       - indices:admin/template*
+      - indices:data/read/scroll*
   indices:
     '?kibana':
       '*':
         - INDICES_ALL
     '?kibana-6':
+      '*':
+        - INDICES_ALL
+    '?kibana_*':
       '*':
         - INDICES_ALL
     '?reporting*':
@@ -118,23 +137,40 @@ sg_kibana_server:
     '?monitoring*':
       '*':
         - INDICES_ALL
+    '?tasks':
+      '*':
+        - INDICES_ALL
+    '?management-beats*':
+      '*':
+        - INDICES_ALL
+    '*':
+      '*':
+        - "indices:admin/aliases*"
 
 # For logstash and beats
 sg_logstash:  
   cluster:
     - CLUSTER_MONITOR
     - CLUSTER_COMPOSITE_OPS
-    - indices:admin/template/get
-    - indices:admin/template/put
+    - CLUSTER_MANAGE_INDEX_TEMPLATES
+    - CLUSTER_MANAGE_ILM
+    - CLUSTER_MANAGE_PIPELINES
+    - cluster:admin/xpack/monitoring/bulk
   indices:
     'logstash-*':
       '*':
         - CRUD
         - CREATE_INDEX
+        - MANAGE
     '*beat*':
       '*':
         - CRUD
         - CREATE_INDEX
+        - MANAGE
+    '*':
+      '*':
+        - "indices:admin/aliases/get"
+      
 
 # Allows adding and modifying repositories and creating and restoring snapshots
 sg_manage_snapshots:
@@ -158,6 +194,10 @@ sg_own_index:
 ### X-Pack COMPATIBILITY
 sg_xp_monitoring:
   readonly: true
+  cluster:
+    - cluster:monitor/xpack/info
+    - cluster:monitor/main
+    - cluster:admin/xpack/monitoring/bulk
   indices:
     '?monitor*':
       '*':

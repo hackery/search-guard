@@ -155,3 +155,28 @@ sg_mindex3:
 sg_ccsresolv:
   users:
     - ccsresolv
+
+sg_underscore:
+  users:
+    - underscore
+    
+sg_kibana_server:
+  readonly: true
+  users:
+    - kibanaserver
+
+sg_env_test:
+  users:
+    - env.replace@example.comp.com
+
+sg_remote_ccs:
+  users:
+    - crusherw
+    
+sg_role_foo_index:
+  users:
+    - foo_index
+    
+sg_role_foo_all:
+  users:
+    - foo_all

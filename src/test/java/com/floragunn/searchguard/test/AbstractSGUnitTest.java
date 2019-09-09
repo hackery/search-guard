@@ -17,19 +17,20 @@
 
 package com.floragunn.searchguard.test;
 
-import io.netty.handler.ssl.OpenSsl;
-
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.junit.LoggerContextRule;
+import org.apache.logging.log4j.test.appender.ListAppender;
 import org.elasticsearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
 import org.elasticsearch.action.get.GetRequest;
@@ -43,10 +44,12 @@ import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.Netty4Plugin;
 import org.junit.Assert;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestName;
-import org.junit.rules.TestWatcher;
 
 import com.floragunn.searchguard.SearchGuardPlugin;
 import com.floragunn.searchguard.action.configupdate.ConfigUpdateAction;
@@ -58,9 +61,13 @@ import com.floragunn.searchguard.support.WildcardMatcher;
 import com.floragunn.searchguard.test.helper.cluster.ClusterInfo;
 import com.floragunn.searchguard.test.helper.file.FileHelper;
 import com.floragunn.searchguard.test.helper.rest.RestHelper.HttpResponse;
-import com.floragunn.searchguard.test.helper.rules.SGTestWatcher;
+
+import io.netty.handler.ssl.OpenSsl;
 
 public abstract class AbstractSGUnitTest {
+    
+    protected static final AtomicLong num = new AtomicLong();
+    protected static boolean withRemoteCluster;
 
 	static {
 
@@ -72,7 +79,8 @@ public abstract class AbstractSGUnitTest {
 				+ System.getProperty("java.vm.vendor") + " " + System.getProperty("java.vm.name"));
 		System.out.println("Open SSL available: " + OpenSsl.isAvailable());
 		System.out.println("Open SSL version: " + OpenSsl.versionString());
-		
+		withRemoteCluster = Boolean.parseBoolean(System.getenv("SG_TEST_WITH_REMOTE_CLUSTER"));
+		System.out.println("With remote cluster: " + withRemoteCluster);
 	    //System.setProperty("sg.display_lic_none","true");
 	}
 	
@@ -90,8 +98,8 @@ public abstract class AbstractSGUnitTest {
 	@Rule
     public final TemporaryFolder repositoryPath = new TemporaryFolder();
 
-	@Rule
-	public final TestWatcher testWatcher = new SGTestWatcher();
+	//@Rule
+	//public final TestWatcher testWatcher = new SGTestWatcher();
 
 	public static Header encodeBasicHeader(final String username, final String password) {
 		return new BasicHeader("Authorization", "Basic "+Base64.getEncoder().encodeToString(
@@ -166,7 +174,7 @@ public abstract class AbstractSGUnitTest {
             } catch (Exception e) {
                 //ignore
             }
-
+            
             for(IndexRequest ir: sgconfig.getDynamicConfig(getResourceFolder())) {
                 tc.index(ir).actionGet();
             }
@@ -174,6 +182,7 @@ public abstract class AbstractSGUnitTest {
             ConfigUpdateResponse cur = tc
                     .execute(ConfigUpdateAction.INSTANCE, new ConfigUpdateRequest(ConfigConstants.CONFIG_NAMES.toArray(new String[0])))
                     .actionGet();
+            Assert.assertFalse(cur.failures().toString(), cur.hasFailures());
             Assert.assertEquals(info.numNodes, cur.getNodes().size());
             
             SearchResponse sr = tc.search(new SearchRequest("searchguard")).actionGet();
@@ -192,11 +201,11 @@ public abstract class AbstractSGUnitTest {
         }
     }
     
-    protected Settings.Builder minimumSearchGuardSettingsBuilder(int node) {
+    protected Settings.Builder minimumSearchGuardSettingsBuilder(int node, boolean sslOnly) {
         
         final String prefix = getResourceFolder()==null?"":getResourceFolder()+"/";
         
-        return Settings.builder()
+        Settings.Builder builder = Settings.builder()
                 //.put("searchguard.ssl.transport.enabled", true)
                  //.put("searchguard.no_default_init", true)
                 //.put("searchguard.ssl.http.enable_openssl_if_available", false)
@@ -208,22 +217,41 @@ public abstract class AbstractSGUnitTest {
                         FileHelper.getAbsoluteFilePathFromClassPath(prefix+"node-0-keystore.jks"))
                 .put("searchguard.ssl.transport.truststore_filepath",
                         FileHelper.getAbsoluteFilePathFromClassPath(prefix+"truststore.jks"))
-                .put("searchguard.ssl.transport.enforce_hostname_verification", false)
-                .putList("searchguard.authcz.admin_dn", "CN=kirk,OU=client,O=client,l=tEst, C=De");
+                .put("searchguard.ssl.transport.enforce_hostname_verification", false);
+        
+                if(!sslOnly) {
+                    builder.putList("searchguard.authcz.admin_dn", "CN=kirk,OU=client,O=client,l=tEst, C=De");
+                    builder.put(ConfigConstants.SEARCHGUARD_BACKGROUND_INIT_IF_SGINDEX_NOT_EXIST, false);
                 //.put(other==null?Settings.EMPTY:other);
+                }
+                
+        return builder;
     }
     
     protected NodeSettingsSupplier minimumSearchGuardSettings(Settings other) {
         return new NodeSettingsSupplier() {
             @Override
             public Settings get(int i) {
-                return minimumSearchGuardSettingsBuilder(i).put(other).build();
+                return minimumSearchGuardSettingsBuilder(i, false).put(other).build();
+            }
+        };
+    }
+    
+    protected NodeSettingsSupplier minimumSearchGuardSettingsSslOnly(Settings other) {
+        return new NodeSettingsSupplier() {
+            @Override
+            public Settings get(int i) {
+                return minimumSearchGuardSettingsBuilder(i, true).put(other).build();
             }
         };
     }
     
     protected void initialize(ClusterInfo info) {
         initialize(info, Settings.EMPTY, new DynamicSgConfig());
+    }
+    
+    protected void initialize(ClusterInfo info, DynamicSgConfig dynamicSgConfig) {
+        initialize(info, Settings.EMPTY, dynamicSgConfig);
     }
     
     protected final void assertContains(HttpResponse res, String pattern) {
@@ -236,5 +264,27 @@ public abstract class AbstractSGUnitTest {
     
     protected String getResourceFolder() {
         return null;
+    }
+    
+    protected static ListAppender appender;
+
+    @ClassRule
+    public static LoggerContextRule init = new LoggerContextRule("log4j2-test.properties");
+
+    @BeforeClass
+    public static void setupLogging() {
+        try {
+            appender = init.getListAppender("list");
+        } catch (Throwable e) {
+            //ignore
+        }
+    }
+
+    @Before
+    public void clearAppender() {
+        
+        if(appender != null) {
+            appender.clear();
+        }
     }
 }

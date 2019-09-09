@@ -117,7 +117,6 @@ CLUSTER_COMPOSITE_OPS_RO:
     - "indices:data/read/mget"
     - "indices:data/read/msearch"
     - "indices:data/read/mtv"
-    - "indices:data/read/coordinate-msearch*"
     - "indices:admin/aliases/exists*"
     - "indices:admin/aliases/get*"
     - "indices:data/read/scroll"
@@ -135,3 +134,29 @@ MANAGE_SNAPSHOTS:
   permissions:
     - "cluster:admin/snapshot/*"
     - "cluster:admin/repository/*"
+
+CLUSTER_MANAGE_ILM:
+  readonly: true
+  permissions:
+  - "cluster:admin/ilm/*"
+
+CLUSTER_READ_ILM:
+  readonly: true
+  permissions:
+  - "cluster:admin/ilm/get"
+  - "cluster:admin/ilm/operation_mode/get"
+
+INDICES_MANAGE_ILM:
+  readonly: true
+  permissions:
+  - "indices:admin/ilm/*"
+
+CLUSTER_MANAGE_INDEX_TEMPLATES:
+  readonly: true
+  permissions:
+  - "indices:admin/template/*"
+
+CLUSTER_MANAGE_PIPELINES:
+  readonly: true
+  permissions:
+  - "cluster:admin/ingest/pipeline/*"

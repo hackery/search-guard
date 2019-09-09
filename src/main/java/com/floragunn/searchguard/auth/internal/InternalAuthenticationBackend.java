@@ -22,19 +22,22 @@ import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.bouncycastle.crypto.generators.OpenBSDBCrypt;
 import org.elasticsearch.ElasticsearchSecurityException;
 import org.elasticsearch.common.settings.Settings;
 
 import com.floragunn.searchguard.auth.AuthenticationBackend;
+import com.floragunn.searchguard.auth.AuthorizationBackend;
 import com.floragunn.searchguard.configuration.ConfigurationRepository;
 import com.floragunn.searchguard.support.ConfigConstants;
 import com.floragunn.searchguard.user.AuthCredentials;
 import com.floragunn.searchguard.user.User;
 
-public class InternalAuthenticationBackend implements AuthenticationBackend {
+public class InternalAuthenticationBackend implements AuthenticationBackend, AuthorizationBackend {
 
     private final ConfigurationRepository configurationRepository;
 
@@ -73,6 +76,19 @@ public class InternalAuthenticationBackend implements AuthenticationBackend {
         if(roles != null) {
             user.addRoles(roles);
         }
+        
+        //FIX https://github.com/opendistro-for-elasticsearch/security/pull/23
+        //Credits to @turettn
+        final Settings customAttributes = cfg.getAsSettings(user.getName() + ".attributes");
+        Map<String, String> attributeMap = new HashMap<>();
+
+        if(customAttributes != null) {
+            for(String attributeName: customAttributes.names()) {
+                attributeMap.put("attr.internal."+attributeName, customAttributes.get(attributeName));
+            }
+        }
+
+        user.addAttributes(attributeMap);
         
         return true;
     }
@@ -145,5 +161,18 @@ public class InternalAuthenticationBackend implements AuthenticationBackend {
 
     private Settings getConfigSettings() {
         return configurationRepository.getConfiguration(ConfigConstants.CONFIGNAME_INTERNAL_USERS);
+    }
+
+    @Override
+    public void fillRoles(User user, AuthCredentials credentials) throws ElasticsearchSecurityException {
+        final Settings cfg = getConfigSettings();
+        if (cfg == null) {
+            throw new ElasticsearchSecurityException("Internal authentication backend not configured. May be Search Guard is not initialized. See http://docs.search-guard.com/v6/sgadmin");
+
+        }
+        final List<String> roles = cfg.getAsList(credentials.getUsername() + ".roles", Collections.emptyList());
+        if(roles != null && !roles.isEmpty() && user != null) {
+            user.addRoles(roles);
+        }
     }
 }
